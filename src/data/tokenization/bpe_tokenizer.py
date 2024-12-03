@@ -1,14 +1,13 @@
-
-# src/data/tokenization/bpe_tokenizer.py
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, defaultdict
 import regex as re
 from pathlib import Path
 import json
 from .vocabulary import Vocabulary
+from tqdm import tqdm
 
 class BPETokenizer:
-    """Byte-Pair Encoding Tokenizer implementation."""
+    """Byte-Pair Encoding Tokenizer implementation with training progress bar."""
     
     def __init__(
         self,
@@ -23,35 +22,40 @@ class BPETokenizer:
         self.pattern = re.compile(r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
     def train(self, texts: List[str]):
-        """Train BPE on a list of texts."""
-        # Count initial tokens (words)
+        """Train BPE on a list of texts with progress tracking."""
+        print("Counting word frequencies...")
         word_freqs = defaultdict(int)
-        for text in texts:
+        for text in tqdm(texts, desc="Processing texts"):
             words = [match.group() for match in self.pattern.finditer(text)]
             for word in words:
                 word_freqs[word] += 1
 
-        # Initialize characters vocabulary
+        print("Building initial character vocabulary...")
         chars = set()
         for word, freq in word_freqs.items():
             if freq < self.min_frequency:
                 continue
             chars.update(word)
 
-        # Add characters to vocabulary
         for char in sorted(chars):
             self.vocab.add_token(char)
 
-        # Initialize splits
         splits: Dict[str, List[str]] = {
             word: [c for c in word]
             for word in word_freqs
             if word_freqs[word] >= self.min_frequency
         }
 
-        # Iteratively merge most frequent pairs
+        num_merges = min(
+            self.vocab_size - len(self.vocab),
+            sum(1 for word in splits if len(splits[word]) >= 2)
+        )
+        
+        print(f"Training BPE: learning {num_merges} merges...")
+        pbar = tqdm(total=num_merges, desc="Learning merges")
+        
         while len(self.vocab) < self.vocab_size:
-            # Count pairs
+            # Count pairs with progress tracking for large vocabularies
             pair_freqs = defaultdict(int)
             for word, freq in word_freqs.items():
                 if freq < self.min_frequency:
@@ -86,6 +90,11 @@ class BPETokenizer:
                         split[i:i + 2] = [new_token]
                     else:
                         i += 1
+                        
+            pbar.update(1)
+            
+        pbar.close()
+        print(f"Final vocabulary size: {len(self.vocab)}")
 
     def encode(self, text: str) -> List[int]:
         """Encode text to token ids."""
