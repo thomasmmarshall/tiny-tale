@@ -107,6 +107,24 @@ model_config = {
 
 [Installation and setup instructions to be added]
 
+```bash
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# For M2 Mac, ensure you're using the correct PyTorch version
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+```
+
+```bash
+# Create datasets
+python scripts/create_wikitext2_dataset.py
+```
+
 ## References
 
 - Attention Is All You Need (Vaswani et al., 2017)

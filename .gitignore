@@ -1,0 +1,144 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Training artifacts
+runs/
+checkpoints/
+wandb/
+logs/
+*.pt
+*.pth
+*.ckpt
+*.bin
+model_weights/
+saved_models/
+
+# Data
+data/
+datasets/
+raw_data/
+processed_data/
+*.csv
+*.txt
+*.json
+*.jsonl
+*.pkl
+*.h5
+*.parquet
+*.arrow
+
+# Tensorboard
+runs/
+events.out.tfevents.*
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation
+docs/_build/
+site/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+*.temp
+
+# Logs
+*.log
+*.log.*
+tmp/
+temp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Large files
+*.gz
+*.zip
+*.tar
+*.7z
+*.rar
+
+# MLFlow
+mlruns/
+
+# DVC
+.dvc/
+*.dvc
+
+# Weights & Biases
+wandb/
+
+# Output directories
+output/
+results/
+experiments/
+
+# Configuration files that might contain secrets
+config.yaml
+*.config
+*_config.yaml
+*_config.json
+
+# Exceptions (add with !)
+!requirements.txt
+!setup.py
+!README.md
+!LICENSE
+!configs/example_config.yaml
+!data/README.md

@@ -3,6 +3,7 @@
 # src/model/architecture/feed_forward.py
 import torch
 import torch.nn as nn
+from config import TransformerConfig
 
 class FeedForward(nn.Module):
     """

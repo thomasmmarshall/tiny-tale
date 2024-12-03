@@ -10,6 +10,7 @@ import psutil
 import GPUtil
 from datetime import datetime
 import json
+from itertools import islice
 
 from data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
 from data.tokenization.bpe_tokenizer import BPETokenizer
@@ -20,9 +21,9 @@ from model.training.trainer import TransformerLightningModule
 class Pipeline:
     def __init__(self, config_path: str, experiment_name: str):
         self.setup_logging(experiment_name)
+        self.logger = logging.getLogger(__name__)
         self.load_config(config_path)
         self.setup_directories(experiment_name)
-        self.logger = logging.getLogger(__name__)
 
     def setup_logging(self, experiment_name: str):
         """Configure detailed logging to both file and console."""

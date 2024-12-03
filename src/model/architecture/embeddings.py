@@ -1,9 +1,9 @@
-
-
 # src/model/architecture/embeddings.py
 import torch
 import torch.nn as nn
 import math
+from config import TransformerConfig
+from typing import Optional
 
 class Embeddings(nn.Module):
     """Combines token embeddings with optional learned position embeddings."""
