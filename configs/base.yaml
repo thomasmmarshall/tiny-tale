@@ -1,0 +1,72 @@
+# configs/training/base.yaml
+model:
+  vocab_size: 50257
+  hidden_size: 768
+  num_layers: 12
+  num_heads: 12
+  intermediate_size: 3072
+  max_seq_length: 1024
+  dropout: 0.1
+  attention_dropout: 0.1
+  tie_word_embeddings: true
+
+training:
+  batch_size: 32
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 1000
+  max_steps: 100000
+  grad_clip_val: 1.0
+  gradient_accumulation_steps: 1
+  precision: 16
+  val_check_interval: 1000
+
+data:
+  train_path: "data/train"
+  val_path: "data/val"
+  num_workers: 4
+
+logging:
+  wandb_project: "transformer-lm"
+  run_name: "base_run"
+  checkpoint_dir: "checkpoints"
+
+hardware:
+  num_gpus: 1
+
+# configs/training/small.yaml
+# Configuration for training on limited hardware (e.g., 8GB RAM)
+model:
+  vocab_size: 8192
+  hidden_size: 384
+  num_layers: 6
+  num_heads: 6
+  intermediate_size: 1536
+  max_seq_length: 256
+  dropout: 0.1
+  attention_dropout: 0.1
+  tie_word_embeddings: true
+
+training:
+  batch_size: 8
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 1000
+  max_steps: 50000
+  grad_clip_val: 1.0
+  gradient_accumulation_steps: 4
+  precision: 16
+  val_check_interval: 500
+
+data:
+  train_path: "data/train"
+  val_path: "data/val"
+  num_workers: 2
+
+logging:
+  wandb_project: "transformer-lm"
+  run_name: "small_run"
+  checkpoint_dir: "checkpoints"
+
+hardware:
+  num_gpus: 1

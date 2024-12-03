@@ -1,0 +1,54 @@
+# configs/pipeline_config.yaml
+data:
+  train_path: "data/raw/train.txt"
+  val_path: "data/raw/val.txt"
+  cleaning:
+    remove_html: true
+    remove_special_chars: true
+    lowercase: true
+    min_length: 20
+    max_length: 100000
+  dataloader:
+    batch_size: 8
+    max_length: 256
+    num_workers: 4
+    shuffle_buffer_size: 10000
+
+tokenizer:
+  min_frequency: 2
+  special_tokens:
+    pad_token: "[PAD]"
+    unk_token: "[UNK]"
+    bos_token: "[BOS]"
+    eos_token: "[EOS]"
+
+model:
+  vocab_size: 8192
+  hidden_size: 384
+  num_hidden_layers: 6
+  num_attention_heads: 6
+  intermediate_size: 1536
+  hidden_dropout_prob: 0.1
+  attention_dropout_prob: 0.1
+  max_position_embeddings: 256
+  initializer_range: 0.02
+  layer_norm_epsilon: 1e-12
+  tie_word_embeddings: true
+
+training:
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_steps: 1000
+  max_steps: 50000
+  grad_clip_val: 1.0
+  gradient_accumulation_steps: 4
+  precision: 16
+  val_check_interval: 500
+
+logging:
+  wandb_project: "transformer-lm"
+  log_every_n_steps: 10
+  save_every_n_steps: 1000
+  monitor_metric: "val_loss"
+  monitor_mode: "min"
+  save_top_k: 3
