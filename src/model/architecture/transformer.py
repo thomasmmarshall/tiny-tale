@@ -255,8 +255,8 @@ class Transformer(nn.Module):
         labels: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # Debug input info
-        print(f"Forward pass - Input shape: {input_ids.shape}, Device: {input_ids.device}, Dtype: {input_ids.dtype}")
-        print(f"Model device: {next(self.parameters()).device}, Dtype: {self.dtype}")
+        # print(f"Forward pass - Input shape: {input_ids.shape}, Device: {input_ids.device}, Dtype: {input_ids.dtype}")
+        # print(f"Model device: {next(self.parameters()).device}, Dtype: {self.dtype}")
         
         # Get input shape
         batch_size, seq_length = input_ids.size()
@@ -283,22 +283,22 @@ class Transformer(nn.Module):
         hidden_states = self.dropout(hidden_states)
         
         # Debug embedding output
-        print(f"Embeddings shape: {hidden_states.shape}, Norm: {hidden_states.norm().item()}")
+        # print(f"Embeddings shape: {hidden_states.shape}, Norm: {hidden_states.norm().item()}")
 
         # Apply transformer layers
         for i, layer in enumerate(self.layers):
             prev_norm = hidden_states.norm().item()
             hidden_states = layer(hidden_states, attention_mask)
             curr_norm = hidden_states.norm().item()
-            if i % 2 == 0:  # Log every other layer to avoid spam
-                print(f"Layer {i} - Input norm: {prev_norm:.3f}, Output norm: {curr_norm:.3f}")
+            # if i % 2 == 0:  # Log every other layer to avoid spam
+                # print(f"Layer {i} - Input norm: {prev_norm:.3f}, Output norm: {curr_norm:.3f}")
 
         # Final layer norm
         hidden_states = self.ln_f(hidden_states)
 
         # Get logits
         logits = self.lm_head(hidden_states)
-        print(f"Logits shape: {logits.shape}, Norm: {logits.norm().item()}")
+        # print(f"Logits shape: {logits.shape}, Norm: {logits.norm().item()}")
 
         # Calculate loss if labels provided
         if labels is not None:
@@ -306,7 +306,7 @@ class Transformer(nn.Module):
             shift_labels = labels[..., 1:].contiguous()
             
             # Debug shapes before loss calculation
-            print(f"Shifted logits shape: {shift_logits.shape}, Labels shape: {shift_labels.shape}")
+            # print(f"Shifted logits shape: {shift_logits.shape}, Labels shape: {shift_labels.shape}")
             
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(
@@ -315,7 +315,7 @@ class Transformer(nn.Module):
             )
             
             # Debug loss
-            print(f"Loss: {loss.item()}, requires_grad: {loss.requires_grad}")
+            # print(f"Loss: {loss.item()}, requires_grad: {loss.requires_grad}")
             
             # Check for NaN or inf
             if not torch.isfinite(loss):

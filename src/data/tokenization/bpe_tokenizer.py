@@ -260,20 +260,33 @@ class BPETokenizer:
         # Convert string tokens to IDs, handling unknown tokens
         token_ids = [self.vocab.token_to_id.get(t, self.unk_token_id) for t in tokens]
         
+        # Add special tokens
         if add_special_tokens:
-            token_ids = [self.bos_token_id] + token_ids + [self.eos_token_id]
+            token_ids = [self.bos_token_id] + token_ids
+            if max_length is None or len(token_ids) < max_length:
+                token_ids = token_ids + [self.eos_token_id]
             
+        # Handle truncation
         if max_length and truncation and len(token_ids) > max_length:
-            token_ids = token_ids[:max_length]
+            if add_special_tokens:
+                # Keep BOS and truncate before EOS
+                token_ids = token_ids[:max_length-1] + [self.eos_token_id]
+            else:
+                token_ids = token_ids[:max_length]
             
+        # Handle padding
+        padding_length = 0
         if max_length and padding and len(token_ids) < max_length:
-            token_ids.extend([self.pad_token_id] * (max_length - len(token_ids)))
+            padding_length = max_length - len(token_ids)
+            token_ids.extend([self.pad_token_id] * padding_length)
             
         output = {'input_ids': token_ids}
+        
+        # Create attention mask
         if return_attention_mask:
-            attention_mask = [1] * len(token_ids)
-            if padding and max_length:
-                attention_mask.extend([0] * (max_length - len(attention_mask)))
+            attention_mask = [1] * (len(token_ids) - padding_length)
+            if padding_length > 0:
+                attention_mask.extend([0] * padding_length)
             output['attention_mask'] = attention_mask
             
         return output

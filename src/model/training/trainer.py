@@ -35,8 +35,8 @@ class TransformerLightningModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # Debug info
-        print(f"Training step {batch_idx}, device: {next(self.parameters()).device}")
-        print(f"Batch size: {batch['input_ids'].shape}, device: {batch['input_ids'].device}")
+        # print(f"Training step {batch_idx}, device: {next(self.parameters()).device}")
+        # print(f"Batch size: {batch['input_ids'].shape}, device: {batch['input_ids'].device}")
         
         # Ensure all tensors are on the correct device
         batch = {k: v.to(self.device) if torch.is_tensor(v) else v for k, v in batch.items()}
@@ -47,12 +47,12 @@ class TransformerLightningModule(pl.LightningModule):
             
             # Check if loss is valid and requires grad
             if not torch.isfinite(loss):
-                print(f"Warning: Loss is not finite: {loss}")
+                # print(f"Warning: Loss is not finite: {loss}")
                 loss = torch.tensor(1.0, device=loss.device, requires_grad=True)
             
             # Ensure loss requires grad
             if not loss.requires_grad:
-                print("Warning: Loss does not require grad")
+                # print("Warning: Loss does not require grad")
                 loss = loss.requires_grad_(True)
         
         # Log training metrics
@@ -76,20 +76,20 @@ class TransformerLightningModule(pl.LightningModule):
                     param_norm = p.grad.detach().data.norm(2)
                     total_norm += param_norm.item() ** 2
             total_norm = total_norm ** 0.5
-            print(f"Gradient norm: {total_norm}")
+            # print(f"Gradient norm: {total_norm}")
             
             # Print parameter statistics
             for name, param in self.named_parameters():
                 if param.grad is not None:
                     grad_norm = param.grad.norm().item()
                     param_norm = param.norm().item()
-                    print(f"{name}: grad_norm={grad_norm:.3f}, param_norm={param_norm:.3f}")
+                    # print(f"{name}: grad_norm={grad_norm:.3f}, param_norm={param_norm:.3f}")
         
         return loss
 
     def validation_step(self, batch, batch_idx):
         # Debug info
-        print(f"Validation step {batch_idx}, device: {next(self.parameters()).device}")
+        # print(f"Validation step {batch_idx}, device: {next(self.parameters()).device}")
         
         # Ensure all tensors are on the correct device
         batch = {k: v.to(self.device) if torch.is_tensor(v) else v for k, v in batch.items()}
@@ -153,6 +153,6 @@ class TransformerLightningModule(pl.LightningModule):
         total_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip_val)
         if not torch.isfinite(total_norm):
             print(f"Warning: Gradient norm is not finite: {total_norm}")
-        else:
-            print(f"Clipped gradient norm: {total_norm}")
+        # else:
+        #     print(f"Clipped gradient norm: {total_norm}")
 

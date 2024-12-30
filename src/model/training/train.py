@@ -14,11 +14,58 @@ import argparse
 from pathlib import Path
 import os
 import json
+import signal
+import sys
 from typing import Optional, Dict, Any
 
 from ..architecture.transformer import TransformerConfig
 from .trainer import TransformerLightningModule
 from ...data.preprocessing.data_module import LMDataModule
+
+# Global variable to track if training should be interrupted
+should_stop = False
+
+def signal_handler(signum, frame):
+    """Handle interrupt signals gracefully."""
+    global should_stop
+    print("\nReceived interrupt signal. Will stop training after current epoch and save model...")
+    should_stop = True
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle non-serializable objects."""
+    def default(self, obj):
+        if isinstance(obj, Path):
+            return str(obj)
+        return super().default(obj)
+
+class GracefulExitCallback(pl.Callback):
+    """Callback to handle graceful exit and model saving."""
+    def __init__(self, experiment_dir: Path):
+        super().__init__()
+        self.experiment_dir = experiment_dir
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        global should_stop
+        if should_stop:
+            # Save the model checkpoint
+            checkpoint_path = self.experiment_dir / 'checkpoints' / 'best_model.ckpt'
+            trainer.save_checkpoint(str(checkpoint_path))
+            
+            # Save tokenizer files if available from the data module
+            if hasattr(trainer.datamodule, 'tokenizer'):
+                tokenizer_dir = self.experiment_dir / 'tokenizer'
+                tokenizer_dir.mkdir(parents=True, exist_ok=True)
+                trainer.datamodule.tokenizer.save_pretrained(str(tokenizer_dir))
+            
+            print(f"\nModel and configurations saved to {self.experiment_dir}")
+            print(f"You can now use this model for inference with:")
+            print(f"  --model_path {self.experiment_dir}")
+            print(f"  --tokenizer_path {self.experiment_dir}/tokenizer")
+            sys.exit(0)
 
 def setup_training_environment(args):
     """Setup training environment with proper logging and device configuration."""
@@ -33,10 +80,12 @@ def setup_training_environment(args):
     experiment_dir = Path(args.output_dir) / args.run_name
     experiment_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save full config
-    config_path = experiment_dir / 'config.json'
-    with open(config_path, 'w') as f:
-        json.dump(vars(args), f, indent=2)
+    # Save full training args for reference
+    args_path = experiment_dir / 'training_args.json'
+    args_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Saving training args to {args_path}")
+    with open(args_path, 'w', encoding='utf-8') as f:
+        json.dump(vars(args), f, indent=2, cls=EnhancedJSONEncoder)
     
     return experiment_dir
 
@@ -98,7 +147,24 @@ def train(args):
         bias=not args.disable_bias
     )
     
-    # Save model config
+    # Save the inference-compatible config.json in experiment directory
+    config_path = experiment_dir / 'config.json'
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump({
+            "vocab_size": config.vocab_size,
+            "hidden_size": config.hidden_size,
+            "num_layers": config.num_hidden_layers,
+            "num_heads": config.num_attention_heads,
+            "intermediate_size": config.intermediate_size,
+            "max_seq_length": config.max_position_embeddings,
+            "hidden_dropout": config.hidden_dropout_prob,
+            "attention_dropout": config.attention_dropout_prob,
+            "disable_rope": not config.use_rope,
+            "disable_bias": not config.bias
+        }, f, indent=2)
+    
+    # Also save the full model config for reference
     config.save(experiment_dir / 'model_config.json')
     
     # Initialize data module with proper error handling
@@ -139,6 +205,7 @@ def train(args):
     
     # Create training callbacks
     callbacks = create_callbacks(args, experiment_dir)
+    callbacks.append(GracefulExitCallback(experiment_dir))  # Add graceful exit callback
     
     # Initialize training strategy
     if args.use_deepspeed:

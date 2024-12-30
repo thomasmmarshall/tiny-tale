@@ -233,6 +233,29 @@ class Pipeline:
             attention_dropout_prob=self.config['model'].get('attention_dropout', 0.1)
         )
 
+        # Save the inference-compatible config.json
+        config_path = self.experiment_dir / 'config.json'
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                "vocab_size": model_config.vocab_size,
+                "hidden_size": model_config.hidden_size,
+                "num_layers": model_config.num_hidden_layers,
+                "num_heads": model_config.num_attention_heads,
+                "intermediate_size": model_config.intermediate_size,
+                "max_seq_length": model_config.max_position_embeddings,
+                "hidden_dropout": model_config.hidden_dropout_prob,
+                "attention_dropout": model_config.attention_dropout_prob,
+                "disable_rope": not model_config.use_rope,
+                "disable_bias": not model_config.bias
+            }, f, indent=2)
+        self.logger.info(f"Saved inference config to {config_path}")
+
+        # Save the full model config for reference
+        model_config_path = self.experiment_dir / 'model_config.json'
+        model_config.save(model_config_path)
+        self.logger.info(f"Saved full model config to {model_config_path}")
+
         model = TransformerLightningModule(
             config=model_config,
             learning_rate=self.config['training']['learning_rate'],
