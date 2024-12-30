@@ -249,51 +249,34 @@ class BPETokenizer:
         if not self.merges:
             raise TokenizerError("Tokenizer is not trained. Call train() first.")
             
-        try:
-            text = self._preprocess_text(text)
-            words = self._tokenize_worker(text)
-            tokens = []
+        text = self._preprocess_text(text)
+        words = self._tokenize_worker(text)
+        tokens = []
+        
+        for word in words:
+            word_tokens = self._encode_word(word)
+            tokens.extend(word_tokens)
             
-            for word in words:
-                tokens.extend(self._encode_word(word))
+        # Convert string tokens to IDs, handling unknown tokens
+        token_ids = [self.vocab.token_to_id.get(t, self.unk_token_id) for t in tokens]
+        
+        if add_special_tokens:
+            token_ids = [self.bos_token_id] + token_ids + [self.eos_token_id]
             
-            # Convert tokens to ids
-            token_ids = []
-            for token in tokens:
-                # Try to get token ID, use UNK token if not found
-                token_id = self.vocab.token_to_id.get(token)
-                if token_id is None:
-                    token_id = self.vocab.token_to_id[self.vocab.special_tokens['<unk>']]
-                token_ids.append(token_id)
+        if max_length and truncation and len(token_ids) > max_length:
+            token_ids = token_ids[:max_length]
             
-            # Handle special tokens
-            if add_special_tokens:
-                bos_token = self.vocab.special_tokens.get('<bos>')
-                eos_token = self.vocab.special_tokens.get('<eos>')
-                if bos_token:
-                    token_ids.insert(0, self.vocab.token_to_id[bos_token])
-                if eos_token:
-                    token_ids.append(self.vocab.token_to_id[eos_token])
+        if max_length and padding and len(token_ids) < max_length:
+            token_ids.extend([self.pad_token_id] * (max_length - len(token_ids)))
             
-            # Handle length constraints
-            if max_length is not None:
-                if truncation and len(token_ids) > max_length:
-                    token_ids = token_ids[:max_length]
-                if padding and len(token_ids) < max_length:
-                    pad_id = self.vocab.token_to_id[self.vocab.special_tokens['<pad>']]
-                    token_ids.extend([pad_id] * (max_length - len(token_ids)))
+        output = {'input_ids': token_ids}
+        if return_attention_mask:
+            attention_mask = [1] * len(token_ids)
+            if padding and max_length:
+                attention_mask.extend([0] * (max_length - len(attention_mask)))
+            output['attention_mask'] = attention_mask
             
-            result = {'input_ids': token_ids}
-            if return_attention_mask:
-                attention_mask = [1] * len(token_ids)
-                if padding and max_length is not None:
-                    attention_mask.extend([0] * (max_length - len(attention_mask)))
-                result['attention_mask'] = attention_mask
-            
-            return result
-            
-        except Exception as e:
-            raise TokenizerError(f"Failed to encode text: {str(e)}")
+        return output
     
     def decode(self, ids: List[int], skip_special_tokens: bool = True) -> str:
         """Decode token ids back to text."""

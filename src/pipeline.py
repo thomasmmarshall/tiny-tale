@@ -11,6 +11,8 @@ import GPUtil
 from datetime import datetime
 import json
 from itertools import islice
+import pytorch_lightning as pl
+import wandb
 
 from data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
 from data.tokenization.bpe_tokenizer import BPETokenizer
@@ -204,40 +206,46 @@ class Pipeline:
 
     def setup_data_module(self, tokenizer: BPETokenizer) -> LMDataModule:
         """Initialize the data module for training."""
+        self.logger.info("Setting up data module...")
         data_config = self.config['data']
+        dataloader_config = data_config['dataloader']
         data_module = LMDataModule(
             train_path=data_config['train_path'],
             val_path=data_config['val_path'],
             tokenizer=tokenizer,
-            **data_config['dataloader']
+            batch_size=dataloader_config['batch_size'],
+            max_length=dataloader_config['max_length'],
+            num_workers=dataloader_config.get('num_workers', 4)
         )
         return data_module
 
     def setup_model(self) -> TransformerLightningModule:
-        """Initialize and log statistics about the transformer model."""
-        self.logger.info("=== Setting up Model ===")
-        model_config = TransformerConfig(**self.config['model'])
-        self.logger.info("Model Configuration:\n" + json.dumps(model_config.__dict__, indent=2))
+        """Initialize the transformer model."""
+        self.logger.info("Setting up model...")
+        model_config = TransformerConfig(
+            vocab_size=self.config['model']['vocab_size'],
+            hidden_size=self.config['model']['hidden_size'],
+            num_hidden_layers=self.config['model']['num_hidden_layers'],
+            num_attention_heads=self.config['model']['num_attention_heads'],
+            intermediate_size=self.config['model']['intermediate_size'],
+            max_position_embeddings=self.config['model']['max_position_embeddings'],
+            hidden_dropout_prob=self.config['model'].get('dropout', 0.1),
+            attention_dropout_prob=self.config['model'].get('attention_dropout', 0.1)
+        )
 
-        # Extract only the parameters needed for the model
-        model_training_params = {
-            'learning_rate': self.config['training']['learning_rate'],
-            'weight_decay': self.config['training']['weight_decay'],
-            'warmup_steps': self.config['training']['warmup_steps'],
-            'max_steps': self.config['training']['max_steps'],
-            'grad_clip_val': self.config['training']['grad_clip_val']
-        }
-        model = TransformerLightningModule(config=model_config, **model_training_params)
+        model = TransformerLightningModule(
+            config=model_config,
+            learning_rate=self.config['training']['learning_rate'],
+            weight_decay=self.config['training'].get('weight_decay', 0.01),
+            warmup_steps=self.config['training'].get('warmup_steps', 1000),
+            max_steps=self.config['training']['max_steps'],
+            grad_clip_val=self.config['training'].get('grad_clip_val', 1.0)
+        )
 
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        model_stats = {
-            "Total Parameters": f"{total_params:,}",
-            "Trainable Parameters": f"{trainable_params:,}",
-            "Model Size (MB)": f"{total_params * 4 / (1024**2):.2f}",
-            "Architecture": str(model)
-        }
-        self.logger.info("Model Statistics:\n" + json.dumps(model_stats, indent=2))
+        # Move model to MPS device if available
+        if torch.backends.mps.is_available():
+            model = model.to(torch.device('mps'))
+            
         return model
 
     def run(self):
@@ -252,7 +260,72 @@ class Pipeline:
             model = self.setup_model()
 
             self.logger.info("=== Starting Model Training ===")
-            model.train()  # Actual training logic should be called here
+            # Initialize training callbacks
+            callbacks = [
+                pl.callbacks.ModelCheckpoint(
+                    dirpath=self.experiment_dir / 'checkpoints',
+                    filename='{epoch}-{step}-{val_loss:.3f}',
+                    save_top_k=3,
+                    monitor='val_loss',
+                    mode='min',
+                    save_last=True,
+                    every_n_train_steps=self.config['training'].get('save_every_n_steps', 1000)
+                ),
+                pl.callbacks.LearningRateMonitor(logging_interval='step')
+            ]
+
+            # Add early stopping if configured
+            if self.config['training'].get('early_stopping_patience', 0) > 0:
+                callbacks.append(pl.callbacks.EarlyStopping(
+                    monitor='val_loss',
+                    patience=self.config['training']['early_stopping_patience'],
+                    mode='min'
+                ))
+
+            # Initialize wandb logger
+            wandb_logger = pl.loggers.WandbLogger(
+                project=self.config['logging']['wandb_project'],
+                name=self.experiment_name,
+                log_model=True,
+                save_dir=str(self.experiment_dir)
+            )
+
+            # Configure training accelerator for M2 GPU
+            if torch.backends.mps.is_available():
+                self.logger.info("Apple M2 GPU (MPS) detected and will be used for training")
+                accelerator = "mps"
+                # MPS currently works best with 32-bit precision
+                precision = "32"
+            else:
+                self.logger.info("Apple M2 GPU not detected, falling back to CPU")
+                accelerator = "cpu"
+                precision = self.config['training'].get('precision', '32')
+
+            # Initialize trainer with MPS-aware configuration
+            trainer = pl.Trainer(
+                max_steps=self.config['training']['max_steps'],
+                accelerator=accelerator,
+                devices=1,  # MPS only supports single device
+                precision=precision,
+                accumulate_grad_batches=self.config['training'].get('gradient_accumulation_steps', 1),
+                gradient_clip_val=self.config['training']['grad_clip_val'],
+                val_check_interval=self.config['training'].get('val_check_interval', 0.5),
+                callbacks=callbacks,
+                logger=wandb_logger,
+                log_every_n_steps=1,  # Log every step
+                enable_progress_bar=True,
+                enable_model_summary=True
+            )
+
+            # Start training
+            self.logger.info("Starting model training...")
+            trainer.fit(model, data_module)
+            self.logger.info("Training completed successfully")
+
+            # Save the final model
+            final_checkpoint_path = self.experiment_dir / 'checkpoints' / 'final_model.ckpt'
+            trainer.save_checkpoint(final_checkpoint_path)
+            self.logger.info(f"Final model saved to {final_checkpoint_path}")
 
             self.logger.info("=== Pipeline Completed Successfully ===")
         except Exception as e:

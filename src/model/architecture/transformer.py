@@ -254,6 +254,10 @@ class Transformer(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        # Debug input info
+        print(f"Forward pass - Input shape: {input_ids.shape}, Device: {input_ids.device}, Dtype: {input_ids.dtype}")
+        print(f"Model device: {next(self.parameters()).device}, Dtype: {self.dtype}")
+        
         # Get input shape
         batch_size, seq_length = input_ids.size()
         device = input_ids.device
@@ -277,26 +281,47 @@ class Transformer(nn.Module):
         hidden_states = word_embeds + position_embeds
         hidden_states = self.ln_embedding(hidden_states)
         hidden_states = self.dropout(hidden_states)
+        
+        # Debug embedding output
+        print(f"Embeddings shape: {hidden_states.shape}, Norm: {hidden_states.norm().item()}")
 
         # Apply transformer layers
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
+            prev_norm = hidden_states.norm().item()
             hidden_states = layer(hidden_states, attention_mask)
+            curr_norm = hidden_states.norm().item()
+            if i % 2 == 0:  # Log every other layer to avoid spam
+                print(f"Layer {i} - Input norm: {prev_norm:.3f}, Output norm: {curr_norm:.3f}")
 
         # Final layer norm
         hidden_states = self.ln_f(hidden_states)
 
         # Get logits
         logits = self.lm_head(hidden_states)
+        print(f"Logits shape: {logits.shape}, Norm: {logits.norm().item()}")
 
         # Calculate loss if labels provided
         if labels is not None:
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
+            
+            # Debug shapes before loss calculation
+            print(f"Shifted logits shape: {shift_logits.shape}, Labels shape: {shift_labels.shape}")
+            
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1)
             )
+            
+            # Debug loss
+            print(f"Loss: {loss.item()}, requires_grad: {loss.requires_grad}")
+            
+            # Check for NaN or inf
+            if not torch.isfinite(loss):
+                print("Warning: Loss is not finite!")
+                print(f"Logits stats - Min: {logits.min().item()}, Max: {logits.max().item()}, Mean: {logits.mean().item()}")
+            
             return loss
 
         return logits
