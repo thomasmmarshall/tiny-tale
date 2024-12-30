@@ -2,6 +2,8 @@
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import json
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -10,21 +12,94 @@ import torch.nn.functional as F
 
 @dataclass
 class TransformerConfig:
-    """Configuration class for Transformer model."""
-    vocab_size: int = 50257
-    hidden_size: int = 768
-    num_hidden_layers: int = 12
-    num_attention_heads: int = 12
-    intermediate_size: int = 3072
+    """Configuration class for transformer model with validation and versioning."""
+    
+    # Model architecture
+    vocab_size: int
+    hidden_size: int
+    num_hidden_layers: int
+    num_attention_heads: int
+    intermediate_size: int
+    max_position_embeddings: int
+    
+    # Optional parameters with defaults
     hidden_dropout_prob: float = 0.1
     attention_dropout_prob: float = 0.1
-    max_position_embeddings: int = 1024
+    layer_norm_epsilon: float = 1e-5
     initializer_range: float = 0.02
-    layer_norm_epsilon: float = 1e-12
-    pad_token_id: int = 0
-    bos_token_id: int = 1
-    eos_token_id: int = 2
-    tie_word_embeddings: bool = True
+    use_cache: bool = True
+    use_rope: bool = True
+    rope_scaling: Optional[dict] = None
+    bias: bool = True
+    
+    # Version tracking
+    config_version: str = "1.0.0"
+    
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        if self.hidden_size % self.num_attention_heads != 0:
+            raise ValueError(
+                f"hidden_size {self.hidden_size} must be divisible by num_attention_heads {self.num_attention_heads}"
+            )
+        
+        if self.intermediate_size < self.hidden_size:
+            raise ValueError(
+                f"intermediate_size {self.intermediate_size} should be larger than hidden_size {self.hidden_size}"
+            )
+            
+        if not 0 <= self.hidden_dropout_prob <= 1:
+            raise ValueError(f"hidden_dropout_prob must be between 0 and 1, got {self.hidden_dropout_prob}")
+            
+        if not 0 <= self.attention_dropout_prob <= 1:
+            raise ValueError(f"attention_dropout_prob must be between 0 and 1, got {self.attention_dropout_prob}")
+    
+    def save(self, save_path: str):
+        """Save configuration to JSON file with version tracking."""
+        config_dict = {
+            k: v for k, v in self.__dict__.items()
+            if not k.startswith('_')
+        }
+        
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(save_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+    
+    @classmethod
+    def from_json(cls, config_path: str) -> 'TransformerConfig':
+        """Load configuration from JSON file with version compatibility check."""
+        with open(config_path) as f:
+            config_dict = json.load(f)
+            
+        loaded_version = config_dict.pop('config_version', '0.0.0')
+        current_version = cls.config_version
+        
+        if loaded_version != current_version:
+            print(f"Warning: Loading config with version {loaded_version}, current version is {current_version}")
+            
+        return cls(**config_dict)
+    
+    def get_num_parameters(self) -> int:
+        """Calculate total number of parameters in the model."""
+        embedding_params = self.vocab_size * self.hidden_size  # Token embeddings
+        position_params = self.max_position_embeddings * self.hidden_size  # Position embeddings
+        
+        # Parameters per layer
+        attention_params = (
+            4 * self.hidden_size * self.hidden_size +  # Q, K, V, O projections
+            (4 * self.hidden_size if self.bias else 0)  # Biases if used
+        )
+        
+        ffn_params = (
+            2 * self.hidden_size * self.intermediate_size +  # Two linear layers
+            self.hidden_size + self.intermediate_size  # Layer norm params
+        )
+        
+        params_per_layer = attention_params + ffn_params
+        total_params = embedding_params + position_params + (params_per_layer * self.num_hidden_layers)
+        
+        return total_params
 
 
 class MultiHeadAttention(nn.Module):

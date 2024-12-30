@@ -1,169 +1,331 @@
-from typing import Dict, List, Tuple, Set, Optional
+from typing import Dict, List, Tuple, Set, Optional, Union
 from collections import Counter, defaultdict
 import regex as re
 from pathlib import Path
 import json
+import logging
+from concurrent.futures import ProcessPoolExecutor
+import numpy as np
+from functools import partial
+import pickle
+from tqdm.auto import tqdm
+import os
+from dataclasses import dataclass, asdict
 from .vocabulary import Vocabulary
-from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class BPEConfig:
+    """Configuration for BPE tokenizer."""
+    vocab_size: int = 8192
+    min_frequency: int = 2
+    special_tokens: Optional[Dict[str, str]] = None
+    max_token_length: int = 100
+    lowercase: bool = False
+    unicode_normalizer: Optional[str] = 'NFKC'
+    cache_capacity: int = 10000
+    num_threads: int = os.cpu_count()
+
+class TokenizerError(Exception):
+    """Base class for tokenizer errors."""
+    pass
 
 class BPETokenizer:
-    """Byte-Pair Encoding Tokenizer implementation with training progress bar."""
+    """Byte-Pair Encoding Tokenizer with caching and parallel processing."""
     
-    def __init__(
-        self,
-        vocab_size: int = 8192,
-        min_frequency: int = 2,
-        special_tokens: Dict[str, str] = None
-    ):
-        self.vocab_size = vocab_size
-        self.min_frequency = min_frequency
-        self.vocab = Vocabulary(special_tokens)
+    def __init__(self, config: Union[BPEConfig, dict]):
+        if isinstance(config, dict):
+            config = BPEConfig(**config)
+        self.config = config
+        
+        # Initialize vocabulary with special tokens
+        self.vocab = Vocabulary(config.special_tokens)
+        
+        # Initialize merge rules
         self.merges: Dict[Tuple[str, str], str] = {}
+        
+        # Compile regex pattern for tokenization
         self.pattern = re.compile(r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
-
+        
+        # Initialize cache
+        self._cache: Dict[str, List[str]] = {}
+        self._cache_keys = []
+    
+    def _preprocess_text(self, text: str) -> str:
+        """Preprocess text with normalization and lowercasing."""
+        if not isinstance(text, str):
+            raise TokenizerError(f"Input must be string, got {type(text)}")
+            
+        if self.config.unicode_normalizer:
+            try:
+                import unicodedata
+                text = unicodedata.normalize(self.config.unicode_normalizer, text)
+            except Exception as e:
+                logger.warning(f"Unicode normalization failed: {str(e)}")
+                
+        if self.config.lowercase:
+            text = text.lower()
+            
+        return text
+    
+    def _update_cache(self, key: str, value: List[str]):
+        """Update LRU cache with size limit."""
+        if key in self._cache:
+            self._cache_keys.remove(key)
+        elif len(self._cache) >= self.config.cache_capacity:
+            oldest_key = self._cache_keys.pop(0)
+            del self._cache[oldest_key]
+            
+        self._cache[key] = value
+        self._cache_keys.append(key)
+    
+    def _tokenize_worker(self, text: str) -> List[str]:
+        """Worker function for parallel tokenization."""
+        return [match.group() for match in self.pattern.finditer(text)]
+    
     def train(self, texts: List[str]):
-        """Train BPE on a list of texts with progress tracking."""
-        print("Counting word frequencies...")
+        """Train BPE with parallel processing and proper error handling."""
+        logger.info("Starting BPE training...")
+        
+        # Parallel word frequency counting
         word_freqs = defaultdict(int)
-        for text in tqdm(texts, desc="Processing texts"):
-            words = [match.group() for match in self.pattern.finditer(text)]
+        with ProcessPoolExecutor(max_workers=self.config.num_threads) as executor:
+            tokenized_texts = list(tqdm(
+                executor.map(self._tokenize_worker, texts),
+                total=len(texts),
+                desc="Tokenizing texts"
+            ))
+            
+        for words in tokenized_texts:
             for word in words:
                 word_freqs[word] += 1
-
-        print("Building initial character vocabulary...")
+        
+        # Build initial character vocabulary
+        logger.info("Building initial character vocabulary...")
         chars = set()
         for word, freq in word_freqs.items():
-            if freq < self.min_frequency:
+            if freq < self.config.min_frequency:
+                continue
+            if len(word) > self.config.max_token_length:
+                logger.warning(f"Skipping word longer than {self.config.max_token_length} chars: {word[:20]}...")
                 continue
             chars.update(word)
-
+        
         for char in sorted(chars):
             self.vocab.add_token(char)
-
-        splits: Dict[str, List[str]] = {
+        
+        # Initialize splits dictionary
+        splits = {
             word: [c for c in word]
-            for word in word_freqs
-            if word_freqs[word] >= self.min_frequency
+            for word, freq in word_freqs.items()
+            if freq >= self.config.min_frequency and len(word) <= self.config.max_token_length
         }
-
+        
+        # Calculate number of merges
         num_merges = min(
-            self.vocab_size - len(self.vocab),
+            self.config.vocab_size - len(self.vocab),
             sum(1 for word in splits if len(splits[word]) >= 2)
         )
         
-        print(f"Training BPE: learning {num_merges} merges...")
+        logger.info(f"Learning {num_merges} BPE merges...")
         pbar = tqdm(total=num_merges, desc="Learning merges")
         
-        while len(self.vocab) < self.vocab_size:
-            # Count pairs with progress tracking for large vocabularies
-            pair_freqs = defaultdict(int)
-            for word, freq in word_freqs.items():
-                if freq < self.min_frequency:
-                    continue
+        try:
+            while len(self.vocab) < self.config.vocab_size:
+                # Count pairs
+                pair_freqs = defaultdict(int)
+                for word, freq in word_freqs.items():
+                    if freq < self.config.min_frequency or len(word) > self.config.max_token_length:
+                        continue
                     
-                split = splits[word]
-                if len(split) < 2:
-                    continue
+                    split = splits.get(word)
+                    if not split or len(split) < 2:
+                        continue
                     
-                for i in range(len(split) - 1):
-                    pair = (split[i], split[i + 1])
-                    pair_freqs[pair] += freq
-
-            if not pair_freqs:
-                break
-
-            # Find most frequent pair
-            best_pair = max(pair_freqs.items(), key=lambda x: x[1])[0]
-            new_token = ''.join(best_pair)
-            self.vocab.add_token(new_token)
-            self.merges[best_pair] = new_token
-
-            # Update splits
-            for word in splits:
-                split = splits[word]
-                if len(split) < 2:
-                    continue
-
-                i = 0
-                while i < len(split) - 1:
-                    if i < len(split) - 1 and tuple(split[i:i + 2]) == best_pair:
-                        split[i:i + 2] = [new_token]
-                    else:
-                        i += 1
-                        
-            pbar.update(1)
-            
-        pbar.close()
-        print(f"Final vocabulary size: {len(self.vocab)}")
-
-    def encode(self, text: str) -> List[int]:
-        """Encode text to token ids."""
-        tokens = []
-        for match in self.pattern.finditer(text):
-            word = match.group()
-            current_tokens = [c for c in word]
-
-            while len(current_tokens) >= 2:
-                pairs = [(current_tokens[i], current_tokens[i + 1]) 
-                        for i in range(len(current_tokens) - 1)]
-                pair_found = False
+                    for i in range(len(split) - 1):
+                        pair = (split[i], split[i + 1])
+                        pair_freqs[pair] += freq
                 
-                for pair in pairs:
-                    if pair in self.merges:
-                        idx = current_tokens.index(pair[0])
-                        current_tokens[idx:idx + 2] = [self.merges[pair]]
-                        pair_found = True
-                        break
-                        
-                if not pair_found:
+                if not pair_freqs:
                     break
-
-            for token in current_tokens:
-                if token in self.vocab.token_to_id:
-                    tokens.append(self.vocab.token_to_id[token])
-                else:
-                    tokens.append(self.vocab.token_to_id[self.vocab.special_tokens['<unk>']])
+                
+                # Find best pair
+                best_pair = max(pair_freqs.items(), key=lambda x: x[1])[0]
+                new_token = ''.join(best_pair)
+                
+                # Validate new token
+                if len(new_token) > self.config.max_token_length:
+                    logger.warning(f"Skipping merge that would create token longer than {self.config.max_token_length} chars")
+                    continue
+                
+                self.vocab.add_token(new_token)
+                self.merges[best_pair] = new_token
+                
+                # Update splits efficiently
+                new_splits = {}
+                for word, split in splits.items():
+                    if len(split) < 2:
+                        new_splits[word] = split
+                        continue
                     
-        return tokens
-
-    def decode(self, ids: List[int]) -> str:
+                    i = 0
+                    new_split = []
+                    while i < len(split):
+                        if i < len(split) - 1 and tuple(split[i:i + 2]) == best_pair:
+                            new_split.append(new_token)
+                            i += 2
+                        else:
+                            new_split.append(split[i])
+                            i += 1
+                    new_splits[word] = new_split
+                
+                splits = new_splits
+                pbar.update(1)
+                
+        except Exception as e:
+            logger.error(f"Error during BPE training: {str(e)}")
+            raise
+        finally:
+            pbar.close()
+            
+        logger.info(f"Finished training. Final vocabulary size: {len(self.vocab)}")
+    
+    def _encode_word(self, word: str) -> List[str]:
+        """Encode a single word to subword tokens using trained merges."""
+        if word in self._cache:
+            return self._cache[word]
+            
+        splits = [c for c in word]
+        while len(splits) >= 2:
+            min_pair = None
+            min_idx = None
+            
+            for i in range(len(splits) - 1):
+                pair = (splits[i], splits[i + 1])
+                if pair in self.merges:
+                    min_pair = pair
+                    min_idx = i
+                    break
+                    
+            if min_pair is None:
+                break
+                
+            splits[min_idx:min_idx + 2] = [self.merges[min_pair]]
+        
+        self._update_cache(word, splits)
+        return splits
+    
+    def encode(
+        self,
+        text: str,
+        add_special_tokens: bool = True,
+        max_length: Optional[int] = None,
+        truncation: bool = False,
+        padding: bool = False,
+        return_attention_mask: bool = False
+    ) -> Dict[str, List[int]]:
+        """Encode text to token ids with various options."""
+        if not self.merges:
+            raise TokenizerError("Tokenizer is not trained. Call train() first.")
+            
+        try:
+            text = self._preprocess_text(text)
+            words = self._tokenize_worker(text)
+            tokens = []
+            
+            for word in words:
+                tokens.extend(self._encode_word(word))
+            
+            # Convert tokens to ids
+            token_ids = [self.vocab[token] for token in tokens]
+            
+            # Handle special tokens
+            if add_special_tokens:
+                if 'bos_token' in self.vocab.special_tokens:
+                    token_ids.insert(0, self.vocab['bos_token'])
+                if 'eos_token' in self.vocab.special_tokens:
+                    token_ids.append(self.vocab['eos_token'])
+            
+            # Handle length constraints
+            if max_length is not None:
+                if truncation and len(token_ids) > max_length:
+                    token_ids = token_ids[:max_length]
+                elif not truncation and len(token_ids) > max_length:
+                    raise TokenizerError(
+                        f"Input sequence length ({len(token_ids)}) exceeds max_length ({max_length}) "
+                        "and truncation is disabled"
+                    )
+                
+                if padding and len(token_ids) < max_length:
+                    pad_length = max_length - len(token_ids)
+                    token_ids.extend([self.vocab['pad_token']] * pad_length)
+            
+            output = {'input_ids': token_ids}
+            if return_attention_mask:
+                attention_mask = [1] * len(token_ids)
+                if padding and max_length:
+                    attention_mask.extend([0] * (max_length - len(attention_mask)))
+                output['attention_mask'] = attention_mask
+                
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error during encoding: {str(e)}")
+            raise TokenizerError(f"Failed to encode text: {str(e)}")
+    
+    def decode(self, ids: List[int], skip_special_tokens: bool = True) -> str:
         """Decode token ids back to text."""
-        tokens = [self.vocab.id_to_token[id] for id in ids]
-        return ''.join(tokens).strip()
-
+        try:
+            tokens = []
+            for id in ids:
+                token = self.vocab.lookup_token(id)
+                if skip_special_tokens and token in self.vocab.special_tokens.values():
+                    continue
+                tokens.append(token)
+            return ''.join(tokens)
+        except Exception as e:
+            logger.error(f"Error during decoding: {str(e)}")
+            raise TokenizerError(f"Failed to decode ids: {str(e)}")
+    
     def save(self, path: str):
-        """Save tokenizer to file."""
-        data = {
-            'vocab_size': self.vocab_size,
-            'min_frequency': self.min_frequency,
-            'merges': {f"{k[0]} {k[1]}": v for k, v in self.merges.items()}
-        }
-        
-        # Save vocabulary
-        vocab_path = Path(path).with_suffix('.vocab')
-        self.vocab.save(str(vocab_path))
-        
-        # Save tokenizer config
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
+        """Save tokenizer state to disk."""
+        try:
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            
+            state = {
+                'config': asdict(self.config),
+                'vocab': self.vocab.to_dict(),
+                'merges': {','.join(k): v for k, v in self.merges.items()}
+            }
+            
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+                
+            logger.info(f"Tokenizer saved to {path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving tokenizer: {str(e)}")
+            raise TokenizerError(f"Failed to save tokenizer: {str(e)}")
+    
     @classmethod
     def load(cls, path: str) -> 'BPETokenizer':
-        """Load tokenizer from file."""
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        """Load tokenizer state from disk."""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                state = json.load(f)
             
-        vocab_path = Path(path).with_suffix('.vocab')
-        vocab = Vocabulary.load(str(vocab_path))
-        
-        tokenizer = cls(
-            vocab_size=data['vocab_size'],
-            min_frequency=data['min_frequency']
-        )
-        tokenizer.vocab = vocab
-        tokenizer.merges = {
-            tuple(k.split(' ')): v 
-            for k, v in data['merges'].items()
-        }
-        
-        return tokenizer
+            tokenizer = cls(state['config'])
+            tokenizer.vocab = Vocabulary.from_dict(state['vocab'])
+            tokenizer.merges = {
+                tuple(k.split(',')): v
+                for k, v in state['merges'].items()
+            }
+            
+            logger.info(f"Tokenizer loaded from {path}")
+            return tokenizer
+            
+        except Exception as e:
+            logger.error(f"Error loading tokenizer: {str(e)}")
+            raise TokenizerError(f"Failed to load tokenizer: {str(e)}")

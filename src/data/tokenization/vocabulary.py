@@ -58,3 +58,7 @@ class Vocabulary:
         vocab.id_to_token = {int(k): v for k, v in data['token_to_id'].items()}
         return vocab
 
+    def __getitem__(self, token: str) -> int:
+        """Get the ID for a token, return UNK token ID if not found."""
+        return self.token_to_id.get(token, self.token_to_id[self.special_tokens['<unk>']])
+

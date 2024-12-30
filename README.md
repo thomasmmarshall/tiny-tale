@@ -1,6 +1,79 @@
 # tiny-tale large language models
 
+_Note_: this is a livingscratchpad, and I am generally not that interested in following any Git or any other best practices here. For transparency, this repository is produced with assistance from various AI tooling (personally I quite like Cursor and Claude Sonnet 3.5).
+
+## Project Overview
+
 A repository for my own in depth investigation into large language models and all that surround them. The name of this repository should be read as a bilingual hyphenation, but also works in English only. This repository contains an educational implementation of a Large Language Model (LLM) training pipeline. The project aims to provide a clear understanding of modern LLM architectures while being practical enough to run on consumer hardware.
+
+In the days before the onslaught of ChatGPT on the world, I was a masters student at Stellenbosch University and I had just taken a class about advanced NLP. Back in those days, large language models were these quirky little guys who just shouted random stuff at you. At the time, I was more interested in applying other areas of NLP theory to accomplish natural language processing tasks. As a student I started a little project to do LLMs from scratch; obviously the landscape looked very different back then. Alas I was not able to finish it. I am now able to finish it, and I am starting again and sharing it with the world. This is a living project, and I will be updating it as I learn more and have time to work on it.
+
+## On the Use of AI Tooling
+
+On the use of AI tooling, over the past 12 months I have seen various LLM-based tools come and go. At first, GPT-3.5 was really not that useful for most things, especially coding. Then came Claude Sonnet 3.5, which still largely knocks it out of the park. During the year we also got Cursor, which has just become more interesting over time. Cursor + Claude Sonnet 3.5 has become my go-to tool for most things. However, I do have some concerns. I do not contest the usefulness of these tools when used properly; they are _immensely_ useful. What does concern me is the possible induction of a slop cycle feedback loop and the blunting of a knife many of us have spent years sharpening. I suppose only time will tell what fresh hell is to be unleashed at scale by widespread use of AI tooling. It is in the interest of these concerns that I am sharing the fact that I am using AI tooling to write this project. It saves me a lot of time, but requires that I be more careful about what I am doing because ultimately the goal of this project is to learn. We must not allow tools of great power to prevent us from learning.
+
+## Table of Contents
+
+- [Full Training Pipeline Overview](#full-training-pipeline-oveview)
+- [Technical Overview](#technical-overview)
+  - [Core Architecture Components](#core-architecture-components)
+    - [Position Embeddings](#position-embeddings)
+    - [Attention Mechanisms](#attention-mechanisms)
+    - [Normalization and Regularization](#normalization-and-regularization)
+  - [Training Infrastructure](#training-infrastructure)
+    - [Mixed Precision Training](#mixed-precision-training)
+    - [Gradient Checkpointing](#gradient-checkpointing)
+    - [Memory-Efficient Optimizations](#memory-efficient-optimizations)
+  - [Tokenization](#tokenization)
+    - [Byte-Pair Encoding (BPE)](#byte-pair-encoding-bpe)
+  - [Fine-tuning Approaches](#fine-tuning-approaches)
+    - [RLHF](#rlhf-reinforcement-learning-from-human-feedback)
+    - [Parameter-Efficient Fine-tuning](#parameter-efficient-fine-tuning)
+  - [Training Data Management](#training-data-management)
+  - [Recommended Model Configurations](#recommended-model-configurations)
+- [Getting Started](#getting-started)
+- [References](#references)
+
+## Full Training Pipeline Oveview
+
+Here's a markdown explanation of the pipeline flow:
+
+The pipeline implements a complete machine learning training workflow for a transformer-based language model, with the following key stages:
+
+1. **Initialization** (`__init__`)
+
+   - Sets up logging infrastructure
+   - Loads configuration from YAML
+   - Creates experiment directory structure
+
+2. **System Logging** (`log_system_info`)
+
+   - Captures detailed system information about CPU, Memory, GPU, and PyTorch
+
+3. **Data Processing** (`process_data`)
+
+   - Reads raw training data
+   - Cleans and preprocesses text using `TextCleaner`
+   - Saves processed data to experiment directory
+   - Logs samples and statistics
+
+4. **Tokenizer Training** (`train_tokenizer`)
+
+   - Trains a BPE tokenizer on processed texts
+   - Configures vocabulary size and special tokens
+   - Saves tokenizer for later use
+   - Logs tokenization examples
+
+5. **Model Setup** (`setup_model`, `setup_data_module`)
+
+   - Initializes the transformer model with configuration
+   - Creates data module for training
+   - Logs model architecture and parameters
+
+6. **Training Execution** (`run`)
+   - Orchestrates the entire pipeline flow
+   - Handles exceptions and logging
+   - Executes training process
 
 ## Technical Overview
 
@@ -132,3 +205,4 @@ python scripts/create_wikitext2_dataset.py
 - InstructGPT: Training Language Models to Follow Instructions (Ouyang et al., 2022)
 - LLaMA: Open and Efficient Foundation Language Models (Touvron et al., 2023)
 - LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)
+- ... etc, will get to it.
