@@ -1,7 +1,7 @@
 # configs/pipeline_config.yaml
 data:
   train_path: "data/raw/train.txt"
-  val_path: "data/raw/val.txt"
+  val_path: "data/raw/valid.txt"
   cleaning:
     remove_html: true
     remove_special_chars: true
@@ -17,10 +17,10 @@ data:
 tokenizer:
   min_frequency: 2
   special_tokens:
-    pad_token: "[PAD]"
-    unk_token: "[UNK]"
-    bos_token: "[BOS]"
-    eos_token: "[EOS]"
+    <pad>: "[PAD]"
+    <unk>: "[UNK]"
+    <bos>: "[BOS]"
+    <eos>: "[EOS]"
 
 model:
   vocab_size: 8192
@@ -32,7 +32,7 @@ model:
   attention_dropout_prob: 0.1
   max_position_embeddings: 256
   initializer_range: 0.02
-  layer_norm_epsilon: 1e-12
+  layer_norm_epsilon: "1e-12"
   tie_word_embeddings: true
 
 training:

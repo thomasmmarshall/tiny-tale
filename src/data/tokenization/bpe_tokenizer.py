@@ -52,6 +52,26 @@ class BPETokenizer:
         self._cache: Dict[str, List[str]] = {}
         self._cache_keys = []
     
+    @property
+    def pad_token_id(self) -> int:
+        """Get the ID of the padding token."""
+        return self.vocab.token_to_id[self.vocab.special_tokens['<pad>']]
+
+    @property
+    def unk_token_id(self) -> int:
+        """Get the ID of the unknown token."""
+        return self.vocab.token_to_id[self.vocab.special_tokens['<unk>']]
+
+    @property
+    def bos_token_id(self) -> int:
+        """Get the ID of the beginning of sequence token."""
+        return self.vocab.token_to_id[self.vocab.special_tokens['<bos>']]
+
+    @property
+    def eos_token_id(self) -> int:
+        """Get the ID of the end of sequence token."""
+        return self.vocab.token_to_id[self.vocab.special_tokens['<eos>']]
+    
     def _preprocess_text(self, text: str) -> str:
         """Preprocess text with normalization and lowercasing."""
         if not isinstance(text, str):
@@ -238,40 +258,41 @@ class BPETokenizer:
                 tokens.extend(self._encode_word(word))
             
             # Convert tokens to ids
-            token_ids = [self.vocab[token] for token in tokens]
+            token_ids = []
+            for token in tokens:
+                # Try to get token ID, use UNK token if not found
+                token_id = self.vocab.token_to_id.get(token)
+                if token_id is None:
+                    token_id = self.vocab.token_to_id[self.vocab.special_tokens['<unk>']]
+                token_ids.append(token_id)
             
             # Handle special tokens
             if add_special_tokens:
-                if 'bos_token' in self.vocab.special_tokens:
-                    token_ids.insert(0, self.vocab['bos_token'])
-                if 'eos_token' in self.vocab.special_tokens:
-                    token_ids.append(self.vocab['eos_token'])
+                bos_token = self.vocab.special_tokens.get('<bos>')
+                eos_token = self.vocab.special_tokens.get('<eos>')
+                if bos_token:
+                    token_ids.insert(0, self.vocab.token_to_id[bos_token])
+                if eos_token:
+                    token_ids.append(self.vocab.token_to_id[eos_token])
             
             # Handle length constraints
             if max_length is not None:
                 if truncation and len(token_ids) > max_length:
                     token_ids = token_ids[:max_length]
-                elif not truncation and len(token_ids) > max_length:
-                    raise TokenizerError(
-                        f"Input sequence length ({len(token_ids)}) exceeds max_length ({max_length}) "
-                        "and truncation is disabled"
-                    )
-                
                 if padding and len(token_ids) < max_length:
-                    pad_length = max_length - len(token_ids)
-                    token_ids.extend([self.vocab['pad_token']] * pad_length)
+                    pad_id = self.vocab.token_to_id[self.vocab.special_tokens['<pad>']]
+                    token_ids.extend([pad_id] * (max_length - len(token_ids)))
             
-            output = {'input_ids': token_ids}
+            result = {'input_ids': token_ids}
             if return_attention_mask:
                 attention_mask = [1] * len(token_ids)
-                if padding and max_length:
+                if padding and max_length is not None:
                     attention_mask.extend([0] * (max_length - len(attention_mask)))
-                output['attention_mask'] = attention_mask
-                
-            return output
+                result['attention_mask'] = attention_mask
+            
+            return result
             
         except Exception as e:
-            logger.error(f"Error during encoding: {str(e)}")
             raise TokenizerError(f"Failed to encode text: {str(e)}")
     
     def decode(self, ids: List[int], skip_special_tokens: bool = True) -> str:

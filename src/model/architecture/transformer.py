@@ -31,6 +31,7 @@ class TransformerConfig:
     use_rope: bool = True
     rope_scaling: Optional[dict] = None
     bias: bool = True
+    tie_word_embeddings: bool = True
     
     # Version tracking
     config_version: str = "1.0.0"

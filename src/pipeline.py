@@ -219,8 +219,15 @@ class Pipeline:
         model_config = TransformerConfig(**self.config['model'])
         self.logger.info("Model Configuration:\n" + json.dumps(model_config.__dict__, indent=2))
 
-        training_params = self.config['training']
-        model = TransformerLightningModule(config=model_config, **training_params)
+        # Extract only the parameters needed for the model
+        model_training_params = {
+            'learning_rate': self.config['training']['learning_rate'],
+            'weight_decay': self.config['training']['weight_decay'],
+            'warmup_steps': self.config['training']['warmup_steps'],
+            'max_steps': self.config['training']['max_steps'],
+            'grad_clip_val': self.config['training']['grad_clip_val']
+        }
+        model = TransformerLightningModule(config=model_config, **model_training_params)
 
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
