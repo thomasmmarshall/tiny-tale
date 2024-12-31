@@ -193,9 +193,23 @@ pip install -r requirements.txt
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
 ```
 
-```bash
+````bash
 # Create datasets
 python scripts/create_wikitext2_dataset.py
+```
+
+# Run training pipeline
+```bash
+python src/pipeline.py configs/pipeline_config.yaml experiment_name
+```
+
+# Run inference pipeline
+```bash
+python src/inference_pipeline.py
+	--model_path experiments/experiment_name
+	--tokenizer_path experiments/experiment_name/tokenizer/tokenizer.json
+	--input_text "What is your name?"
+	--max_length 100 --temperature 0.9 --top_k 50 --top_p 0.92
 ```
 
 ## References
@@ -206,3 +220,4 @@ python scripts/create_wikitext2_dataset.py
 - LLaMA: Open and Efficient Foundation Language Models (Touvron et al., 2023)
 - LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)
 - ... etc, will get to it.
+````

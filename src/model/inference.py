@@ -13,15 +13,15 @@ class ModelInference:
     def __init__(
         self,
         model_path: Union[str, Path],
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        dtype: torch.dtype = torch.float16 if torch.cuda.is_available() else torch.float32,
+        device: str = "mps" if torch.backends.mps.is_available() else "cpu",
+        dtype: torch.dtype = torch.float32,
     ):
         """Initialize the inference wrapper.
         
         Args:
             model_path: Path to the saved model checkpoint directory
-            device: Device to run inference on ('cpu' or 'cuda')
-            dtype: Data type for model weights (float16 for efficiency on GPU)
+            device: Device to run inference on ('cpu' or 'mps' on Apple Silicon)
+            dtype: Data type for model weights (float32 for MPS compatibility)
         """
         self.device = device
         self.dtype = dtype
@@ -73,14 +73,12 @@ class ModelInference:
         pad_token_id: int = 0,
         eos_token_id: Optional[int] = None,
         min_length: int = 20,
+        repetition_penalty: float = 1.5,
+        no_repeat_ngram_size: int = 4,
     ) -> List[List[int]]:
-        """Generate text using the model."""
+        """Generate text using the model with enhanced repetition prevention."""
         # Move input to device and convert to correct dtype
         input_ids = input_ids.to(device=self.device)
-        print(f"\nGeneration details:")
-        print(f"Input device: {input_ids.device}, Input dtype: {input_ids.dtype}")
-        print(f"Model device: {next(self.model.parameters()).device}")
-        print(f"Model dtype: {next(self.model.parameters()).dtype}")
         
         batch_size = input_ids.shape[0]
         input_length = input_ids.shape[1]
@@ -88,7 +86,6 @@ class ModelInference:
         # Expand input for multiple sequences per sample
         if num_return_sequences > 1:
             input_ids = input_ids.repeat(num_return_sequences, 1)
-            print(f"Expanded input shape for {num_return_sequences} sequences: {input_ids.shape}")
             
         # Initialize generation output with input sequence
         generated = input_ids
@@ -99,11 +96,9 @@ class ModelInference:
         # Keep track of which sequences have finished
         unfinished_sequences = torch.ones(generated.shape[0], dtype=torch.long, device=self.device)
         
-        # Track repetition
-        repetition_penalty = 1.2
-        
-        # Generate tokens one at a time
-        print(f"\nStarting generation loop from length {input_length} to {max_length}")
+        # Create a set to store generated n-grams for each sequence
+        if no_repeat_ngram_size > 0:
+            banned_ngrams = [set() for _ in range(generated.shape[0])]
         
         while (generated.shape[1] < max_length) and (unfinished_sequences.sum() > 0):
             # Get model predictions
@@ -113,86 +108,79 @@ class ModelInference:
             )
             
             # Get next token logits
-            next_token_logits = model_outputs[:, -1, :]
+            next_token_logits = model_outputs[:, -1, :].float()
             
-            # Create mask for special tokens
-            special_tokens_mask = torch.zeros((next_token_logits.shape[-1],), device=self.device)
-            if generated.shape[1] < min_length:
-                special_tokens_mask[eos_token_id] = -float('inf')  # Prevent EOS before min_length
+            # Apply repetition penalty
+            if repetition_penalty != 1.0:
+                for i in range(batch_size):
+                    for previous_token in set(generated[i].tolist()):
+                        # Apply exponential penalty based on frequency
+                        freq = (generated[i] == previous_token).sum().item()
+                        next_token_logits[i, previous_token] /= (repetition_penalty ** freq)
             
-            # Never generate BOS, PAD, or repeated EOS tokens
-            special_tokens_mask[[pad_token_id, 2]] = -float('inf')  # 2 is BOS token ID
-            if generated.shape[1] > 0 and generated[:, -1].item() == eos_token_id:
-                special_tokens_mask[eos_token_id] = -float('inf')  # Prevent multiple EOS tokens
+            # Apply n-gram blocking
+            if no_repeat_ngram_size > 0:
+                for batch_idx in range(generated.shape[0]):
+                    # Get the last n-1 tokens
+                    prev_tokens = generated[batch_idx, -(no_repeat_ngram_size-1):].tolist()
+                    
+                    # For each potential next token
+                    for token_idx in range(next_token_logits.shape[-1]):
+                        # Check if completing this n-gram would create a repeat
+                        ngram = tuple(prev_tokens + [token_idx])
+                        if ngram in banned_ngrams[batch_idx]:
+                            next_token_logits[batch_idx, token_idx] = -float('inf')
             
-            next_token_logits = next_token_logits + special_tokens_mask
-            
-            # Enhanced repetition prevention with n-gram blocking
-            for i in range(batch_size):
-                # Get sequence history for n-gram checking
-                seq_history = generated[i].tolist()
-                
-                # Check for repeating n-grams (n=3,4,5)
-                for n in [3, 4, 5]:
-                    if len(seq_history) >= n * 2:
-                        # Get the last n tokens
-                        last_ngram = seq_history[-n:]
-                        # Check if this n-gram appears in the recent history
-                        for j in range(len(seq_history) - n):
-                            if seq_history[j:j + n] == last_ngram:
-                                # If we find a repeat, heavily penalize the next token that would continue the pattern
-                                if j + n < len(seq_history):
-                                    next_token_logits[i, seq_history[j + n]] = -float('inf')
-                
-                # Get the last few tokens to check for repetition
-                last_tokens = seq_history[-15:]  # Increased window to 15 tokens
-                for previous_token in set(last_tokens):
-                    count = last_tokens.count(previous_token)
-                    # Completely prevent immediate repetition
-                    if previous_token == seq_history[-1]:
-                        next_token_logits[i, previous_token] = -float('inf')
-                    # Apply exponential penalty for frequent tokens
-                    elif count > 1:
-                        penalty = repetition_penalty ** count
-                        next_token_logits[i, previous_token] /= penalty
-            
-            # Apply temperature
-            if temperature == 0:
-                # Greedy decoding
-                next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
-            else:
-                # Apply temperature scaling
+            # Apply temperature scaling
+            if temperature > 0:
                 next_token_logits = next_token_logits / temperature
+            else:
+                # For temperature = 0, use greedy decoding
+                next_tokens = torch.argmax(next_token_logits, dim=-1, keepdim=True)
                 
-                # Apply top-k filtering
-                if top_k > 0:
-                    top_k_logits, top_k_indices = torch.topk(next_token_logits, min(top_k, next_token_logits.size(-1)))
-                    next_token_logits = torch.full_like(next_token_logits, -float('inf'))
-                    next_token_logits.scatter_(1, top_k_indices, top_k_logits)
+            # Apply top-k filtering
+            if top_k > 0:
+                indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
+                next_token_logits[indices_to_remove] = -float('inf')
+            
+            # Apply top-p (nucleus) filtering
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
                 
-                # Apply top-p (nucleus) filtering
-                if top_p < 1.0:
-                    sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                    
-                    # Remove tokens with cumulative probability above the threshold
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                    sorted_indices_to_remove[..., 0] = 0
-                    
-                    indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                    next_token_logits[indices_to_remove] = -float('inf')
+                # Remove tokens with cumulative probability above the threshold
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
                 
-                # Ensure valid probabilities and sample
-                if torch.max(next_token_logits) == -float('inf'):
-                    # If all tokens are masked, allow the top 10 tokens from the original logits
-                    top_logits, top_indices = torch.topk(model_outputs[:, -1, :], k=10)
-                    next_token_logits = torch.full_like(next_token_logits, -float('inf'))
-                    next_token_logits.scatter_(1, top_indices, F.softmax(top_logits / temperature, dim=-1))
-                
-                # Sample next token
-                probs = F.softmax(next_token_logits, dim=-1)
+                for batch_idx in range(next_token_logits.shape[0]):
+                    indices_to_remove = sorted_indices_to_remove[batch_idx].scatter(
+                        0, sorted_indices[batch_idx], sorted_indices_to_remove[batch_idx]
+                    )
+                    next_token_logits[batch_idx][indices_to_remove] = -float('inf')
+            
+            # Ensure at least one token has a valid probability
+            if (next_token_logits == -float('inf')).all(dim=-1).any():
+                problematic_batches = (next_token_logits == -float('inf')).all(dim=-1)
+                next_token_logits[problematic_batches, :] = 0
+                # Allow only the top token for problematic batches
+                next_token_logits[problematic_batches, :] = -float('inf')
+                top_tokens = torch.topk(model_outputs[problematic_batches, -1, :], k=1)[1]
+                next_token_logits[problematic_batches, top_tokens] = 0
+            
+            # Sample next tokens
+            probs = F.softmax(next_token_logits, dim=-1)
+            if temperature == 0:
+                next_tokens = torch.argmax(probs, dim=-1)
+            else:
                 next_tokens = torch.multinomial(probs, num_samples=1)
+            
+            # Update n-gram sets
+            if no_repeat_ngram_size > 0:
+                for batch_idx in range(generated.shape[0]):
+                    prev_tokens = generated[batch_idx, -no_repeat_ngram_size+1:].tolist()
+                    ngram = tuple(prev_tokens + [next_tokens[batch_idx].item()])
+                    banned_ngrams[batch_idx].add(ngram)
             
             # Only replace token in unfinished sequences
             tokens_to_add = next_tokens * unfinished_sequences.unsqueeze(-1)
@@ -203,13 +191,14 @@ class ModelInference:
             
             # Update which sequences are finished
             if eos_token_id is not None and generated.shape[1] >= min_length:
-                unfinished_sequences = unfinished_sequences.mul((tokens_to_add.squeeze(-1) != eos_token_id).long())
+                unfinished_sequences = unfinished_sequences.mul(
+                    (tokens_to_add.squeeze(-1) != eos_token_id).long()
+                )
                 
                 # Early stopping if all sequences are finished
                 if unfinished_sequences.max() == 0:
                     break
         
-        print(f"\nGeneration finished at length {generated.shape[1]}")
         return generated.tolist()
     
     @torch.no_grad()

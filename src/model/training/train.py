@@ -223,10 +223,9 @@ def train(args):
     trainer = pl.Trainer(
         max_steps=args.max_steps,
         max_epochs=args.max_epochs,
-        accelerator='auto',
-        devices=args.num_gpus if args.num_gpus > 0 else 'auto',
-        strategy=strategy,
-        precision=args.precision,
+        accelerator='mps',
+        devices=1,
+        precision=32,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         gradient_clip_val=args.grad_clip_val,
         val_check_interval=args.val_check_interval,

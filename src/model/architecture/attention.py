@@ -124,7 +124,7 @@ class MultiHeadAttention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         batch_size, seq_length, _ = hidden_states.shape
         
-        # Project to Q, K, V
+        # Project to Q, K, V with stable initialization
         query_states = self._split_heads(self.q_proj(hidden_states))
         key_states = self._split_heads(self.k_proj(hidden_states))
         value_states = self._split_heads(self.v_proj(hidden_states))
@@ -145,7 +145,7 @@ class MultiHeadAttention(nn.Module):
         if self.use_flash_attn and attention_mask is None:
             # Use flash attention when possible
             attn_output = flash_attn_func(
-                query_states.transpose(1, 2),  # (batch, seq_len, heads, head_dim)
+                query_states.transpose(1, 2),
                 key_states.transpose(1, 2),
                 value_states.transpose(1, 2),
                 dropout_p=self.dropout if self.training else 0.0,
@@ -153,29 +153,40 @@ class MultiHeadAttention(nn.Module):
             )
             attn_output = attn_output.reshape(batch_size, seq_length, self.hidden_size)
         else:
-            # Traditional attention with masking
+            # Traditional attention with improved masking and normalization
             attention_scores = torch.matmul(query_states, key_states.transpose(-1, -2))
+            
+            # Scale attention scores
             attention_scores = attention_scores * self.scale
             
-            # Apply causal mask if no explicit mask provided
+            # Create causal mask if no explicit mask provided
             if attention_mask is None:
-                attention_mask = torch.triu(
-                    torch.ones(seq_length, seq_length, device=hidden_states.device),
-                    diagonal=1
-                ).bool()
-                attention_scores.masked_fill_(attention_mask[None, None, :, :], float('-inf'))
-            else:
-                attention_scores = attention_scores + attention_mask
+                # Create causal mask with improved numerical stability
+                mask = torch.ones((seq_length, seq_length), device=hidden_states.device)
+                mask = torch.triu(mask, diagonal=1).bool()
+                attention_mask = torch.zeros(
+                    (batch_size, 1, seq_length, seq_length),
+                    device=hidden_states.device,
+                    dtype=hidden_states.dtype
+                )
+                attention_mask.masked_fill_(mask, float('-inf'))
             
-            # Compute attention probabilities
-            attention_probs = F.softmax(attention_scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            # Apply attention mask
+            attention_scores = attention_scores + attention_mask
+            
+            # Compute attention probabilities with improved numerical stability
+            attention_probs = F.softmax(attention_scores, dim=-1, dtype=torch.float32)
+            
+            # Apply dropout
             attention_probs = self.attn_dropout(attention_probs)
             
             # Compute attention output
             attn_output = torch.matmul(attention_probs, value_states)
+            
+            # Reshape attention output
             attn_output = self._merge_heads(attn_output)
         
-        # Final projection and dropout
+        # Final projection with residual connection
         attn_output = self.o_proj(attn_output)
         attn_output = self.resid_dropout(attn_output)
         

@@ -7,8 +7,8 @@ from tqdm import tqdm
 from datasets import load_dataset
 from typing import Dict, Any
 
-class WikiText2Processor:
-    """Downloads and processes WikiText-2 dataset using HuggingFace datasets."""
+class WikiText103Processor:
+    """Downloads and processes WikiText-103 dataset using HuggingFace datasets."""
     
     def __init__(
         self,
@@ -17,7 +17,7 @@ class WikiText2Processor:
     ):
         self.output_dir = Path(output_dir)
         self.use_raw = use_raw
-        self.dataset_name = "wikitext-raw-v1" if use_raw else "wikitext-2-v1"
+        self.dataset_name = "wikitext-raw-v1" if use_raw else "wikitext-103-v1"
         self.setup_logging()
 
     def setup_logging(self):
@@ -48,15 +48,15 @@ class WikiText2Processor:
         return line_count
 
     def create_dataset(self) -> None:
-        """Create the WikiText-2 dataset."""
+        """Create the WikiText-103 dataset."""
         try:
             # Create output directory
             self.output_dir.mkdir(parents=True, exist_ok=True)
             
-            self.logger.info("Loading WikiText-2 dataset from HuggingFace")
+            self.logger.info("Loading WikiText-103 dataset from HuggingFace")
             dataset = load_dataset(
                 "wikitext",
-                "wikitext-2-raw-v1" if self.use_raw else "wikitext-2-v1",
+                "wikitext-103-raw-v1" if self.use_raw else "wikitext-103-v1",
             )
             
             # Process each split
@@ -76,11 +76,11 @@ class WikiText2Processor:
             
             # Save dataset info
             dataset_info = {
-                'name': 'WikiText-2',
+                'name': 'WikiText-103',
                 'version': 'raw' if self.use_raw else 'tokenized',
                 'splits': dataset_stats,
                 'source': 'HuggingFace Datasets',
-                'description': 'WikiText-2 dataset for language modeling (https://huggingface.co/datasets/wikitext)'
+                'description': 'WikiText-103 dataset for language modeling (https://huggingface.co/datasets/wikitext)'
             }
             
             with open(self.output_dir / 'dataset_info.json', 'w') as f:
@@ -96,13 +96,13 @@ class WikiText2Processor:
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='Create WikiText-2 dataset')
+    parser = argparse.ArgumentParser(description='Create WikiText-103 dataset')
     parser.add_argument('--output_dir', default='data/raw', help='Output directory')
     parser.add_argument('--use_raw', action='store_true', help='Use raw text version instead of tokenized')
     
     args = parser.parse_args()
     
-    processor = WikiText2Processor(
+    processor = WikiText103Processor(
         output_dir=args.output_dir,
         use_raw=args.use_raw
     )
