@@ -2,6 +2,11 @@
 
 _Note_: this is a livingscratchpad, and I am generally not that interested in following any Git or any other best practices here. For transparency, this repository is produced with assistance from various AI tooling (personally I quite like Cursor and Claude Sonnet 3.5).
 
+## Latest Update Notes
+
+- 2025-01-01: Decided it is not possible to get sensible outputs from a 10M parameter model training on ~2M tokens.
+- 2025-01-04: Heuristics suggest good results can be obtained with 20 tokens per trainable parameter. So I'm trying to use wikitext103 as a dataset. However, it is becoming increasingly clear why scaling is so hard and is such a big deal in the LLM world.
+
 ## Project Overview
 
 A repository for my own in depth investigation into large language models and all that surround them; and this has to run on my base model 8GB M2 Macbook Air. The name of this repository should be read as a bilingual hyphenation, but also works in English only. This repository contains an educational implementation of a Large Language Model (LLM) training pipeline. The project aims to provide a clear understanding of modern LLM architectures while being practical enough to run on consumer hardware.
