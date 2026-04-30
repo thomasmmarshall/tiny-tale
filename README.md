@@ -24,18 +24,24 @@ For 8GB RAM constraints:
 
 ```python
 model_config = {
-    'vocab_size': 8192,        # Smaller vocabulary for efficiency
-    'hidden_size': 384,        # Balanced for expressivity vs memory
-    'num_layers': 6,           # Enough depth for non-trivial learning
-    'num_heads': 6,            # Multiple attention patterns
-    'max_seq_length': 256,     # Manageable context size
-    'batch_size': 8,           # Adjusted based on memory
-    'learning_rate': 3e-4,     # Standard for transformer training
-    'warmup_steps': 1000,      # Gradual learning rate warmup
-    'gradient_checkpointing': True,  # Memory optimization
-    'mixed_precision': 'fp16'   # Memory and speed optimization
+    'vocab_size': 16384,
+    'hidden_size': 384,
+    'num_hidden_layers': 8,
+    'num_attention_heads': 6,
+    'num_key_value_heads': 2,      # grouped-query attention
+    'intermediate_size': 1024,     # SwiGLU FFN
+    'max_position_embeddings': 512,
+    'use_rope': True,
+    'use_rms_norm': True,
+    'gradient_checkpointing': True,
+    'learning_rate': 3e-4,
+    'warmup_steps': 500,
 }
 ```
+
+The core block follows current small-LLM practice: RMSNorm, RoPE, SwiGLU,
+grouped-query capable attention, tied embeddings, SDPA where available, and
+warmup + cosine learning-rate decay.
 
 ## Getting Started
 

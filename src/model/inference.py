@@ -43,7 +43,10 @@ class ModelInference:
             hidden_dropout_prob=config_dict.get("hidden_dropout", 0.1),
             attention_dropout_prob=config_dict.get("attention_dropout", 0.1),
             use_rope=not config_dict.get("disable_rope", False),
-            bias=not config_dict.get("disable_bias", False)
+            bias=not config_dict.get("disable_bias", False),
+            num_key_value_heads=config_dict.get("num_key_value_heads"),
+            rope_theta=config_dict.get("rope_theta", 10000.0),
+            use_sdpa=config_dict.get("use_sdpa", True),
         )
         
         # Initialize model

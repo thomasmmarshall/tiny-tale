@@ -153,7 +153,8 @@ def train(args):
         hidden_dropout_prob=args.hidden_dropout,
         attention_dropout_prob=args.attention_dropout,
         use_rope=not args.disable_rope,
-        bias=not args.disable_bias
+        bias=not args.disable_bias,
+        num_key_value_heads=args.num_key_value_heads,
     )
     
     # Save the inference-compatible config.json in experiment directory
@@ -170,7 +171,10 @@ def train(args):
             "hidden_dropout": config.hidden_dropout_prob,
             "attention_dropout": config.attention_dropout_prob,
             "disable_rope": not config.use_rope,
-            "disable_bias": not config.bias
+            "disable_bias": not config.bias,
+            "num_key_value_heads": config.num_key_value_heads,
+            "rope_theta": config.rope_theta,
+            "use_sdpa": config.use_sdpa,
         }, f, indent=2)
     
     # Also save the full model config for reference
@@ -221,6 +225,7 @@ def train(args):
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_steps,
         max_steps=args.max_steps,
+        min_learning_rate=args.min_learning_rate,
         use_gradient_checkpointing=args.gradient_checkpointing
     )
     
@@ -303,6 +308,7 @@ def main():
     parser.add_argument('--attention_dropout', type=float, default=0.1)
     parser.add_argument('--disable_rope', action='store_true')
     parser.add_argument('--disable_bias', action='store_true')
+    parser.add_argument('--num_key_value_heads', type=int)
     
     # Training arguments
     parser.add_argument('--train_path', type=str, required=True)
@@ -315,6 +321,7 @@ def main():
     parser.add_argument('--run_name', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--learning_rate', type=float, default=3e-4)
+    parser.add_argument('--min_learning_rate', type=float, default=None)
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--warmup_steps', type=int, default=1000)
     parser.add_argument('--max_steps', type=int, default=100000)
