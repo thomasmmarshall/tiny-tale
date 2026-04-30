@@ -1,7 +1,6 @@
 # src/model/architecture/transformer.py
-import math
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 import json
 from pathlib import Path
 
@@ -130,7 +129,7 @@ class MultiHeadAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        attention_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # Project inputs to Q, K, V
         query_layer = self.transpose_for_scores(self.query(hidden_states))
@@ -139,11 +138,10 @@ class MultiHeadAttention(nn.Module):
 
         # Calculate attention scores
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        attention_scores = attention_scores * (self.attention_head_size ** -0.5)
         
-        # Apply attention mask if provided
-        if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask
+        if attention_bias is not None:
+            attention_scores = attention_scores + attention_bias
 
         # Normalize attention scores to probabilities
         attention_probs = F.softmax(attention_scores, dim=-1)
@@ -193,12 +191,12 @@ class TransformerBlock(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        attention_bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # Self-attention
         attn_output = self.attention(
             self.ln_1(hidden_states),  # Pre-normalization
-            attention_mask=attention_mask,
+            attention_bias=attention_bias,
         )
         hidden_states = hidden_states + self.dropout(attn_output)
 
@@ -254,10 +252,6 @@ class Transformer(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        # Debug input info
-        # print(f"Forward pass - Input shape: {input_ids.shape}, Device: {input_ids.device}, Dtype: {input_ids.dtype}")
-        # print(f"Model device: {next(self.parameters()).device}, Dtype: {self.dtype}")
-        
         # Get input shape
         batch_size, seq_length = input_ids.size()
         device = input_ids.device
@@ -270,10 +264,15 @@ class Transformer(nn.Module):
         if attention_mask is None:
             attention_mask = torch.ones((batch_size, seq_length), device=device)
 
-        # Convert attention mask to attention bias
-        attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
-        attention_mask = attention_mask.to(dtype=next(self.parameters()).dtype)
-        attention_mask = (1.0 - attention_mask) * torch.finfo(self.dtype).min
+        attention_mask = attention_mask.to(device=device, dtype=self.dtype)
+        padding_bias = (1.0 - attention_mask[:, None, None, :]) * torch.finfo(self.dtype).min
+        causal_mask = torch.triu(
+            torch.ones((seq_length, seq_length), device=device, dtype=torch.bool),
+            diagonal=1,
+        )
+        causal_bias = torch.zeros((1, 1, seq_length, seq_length), device=device, dtype=self.dtype)
+        causal_bias = causal_bias.masked_fill(causal_mask, torch.finfo(self.dtype).min)
+        attention_bias = padding_bias + causal_bias
 
         # Get embeddings
         word_embeds = self.word_embeddings(input_ids)
@@ -286,12 +285,8 @@ class Transformer(nn.Module):
         # print(f"Embeddings shape: {hidden_states.shape}, Norm: {hidden_states.norm().item()}")
 
         # Apply transformer layers
-        for i, layer in enumerate(self.layers):
-            prev_norm = hidden_states.norm().item()
-            hidden_states = layer(hidden_states, attention_mask)
-            curr_norm = hidden_states.norm().item()
-            # if i % 2 == 0:  # Log every other layer to avoid spam
-                # print(f"Layer {i} - Input norm: {prev_norm:.3f}, Output norm: {curr_norm:.3f}")
+        for layer in self.layers:
+            hidden_states = layer(hidden_states, attention_bias)
 
         # Final layer norm
         hidden_states = self.ln_f(hidden_states)
@@ -308,7 +303,7 @@ class Transformer(nn.Module):
             # Debug shapes before loss calculation
             # print(f"Shifted logits shape: {shift_logits.shape}, Labels shape: {shift_labels.shape}")
             
-            loss_fct = nn.CrossEntropyLoss()
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
             loss = loss_fct(
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1)

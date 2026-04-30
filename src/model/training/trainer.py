@@ -1,9 +1,6 @@
 # src/model/training/trainer.py
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
-from typing import Optional, Dict, Any
-import wandb
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.optim import AdamW
 
@@ -17,7 +14,8 @@ class TransformerLightningModule(pl.LightningModule):
         weight_decay: float = 0.01,
         warmup_steps: int = 1000,
         max_steps: int = 100000,
-        grad_clip_val: float = 1.0
+        grad_clip_val: float = 1.0,
+        use_gradient_checkpointing: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -29,6 +27,7 @@ class TransformerLightningModule(pl.LightningModule):
         self.warmup_steps = warmup_steps
         self.max_steps = max_steps
         self.grad_clip_val = grad_clip_val
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
     def forward(self, batch):
         return self.model(**batch)
@@ -56,11 +55,11 @@ class TransformerLightningModule(pl.LightningModule):
                 loss = loss.requires_grad_(True)
         
         # Log training metrics
-        self.log('train_loss', loss.item(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Calculate and log perplexity
         perplexity = torch.exp(loss)
-        self.log('train_perplexity', perplexity.item(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('train_perplexity', perplexity, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Log learning rate
         opt = self.optimizers()
@@ -97,11 +96,11 @@ class TransformerLightningModule(pl.LightningModule):
         loss = self.model(**batch)
         
         # Log validation metrics
-        self.log('val_loss', loss.item(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Calculate and log perplexity
         perplexity = torch.exp(loss)
-        self.log('val_perplexity', perplexity.item(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log('val_perplexity', perplexity, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         
         return loss
 

@@ -1,13 +1,10 @@
-from typing import Dict, List, Tuple, Set, Optional, Union
-from collections import Counter, defaultdict
+from typing import Dict, List, Tuple, Optional, Union
+from collections import defaultdict
 import regex as re
 from pathlib import Path
 import json
 import logging
 from concurrent.futures import ProcessPoolExecutor
-import numpy as np
-from functools import partial
-import pickle
 from tqdm.auto import tqdm
 import os
 from dataclasses import dataclass, asdict
@@ -25,7 +22,7 @@ class BPEConfig:
     lowercase: bool = False
     unicode_normalizer: Optional[str] = 'NFKC'
     cache_capacity: int = 10000
-    num_threads: int = os.cpu_count()
+    num_threads: int = 1
 
 class TokenizerError(Exception):
     """Base class for tokenizer errors."""
@@ -108,14 +105,19 @@ class BPETokenizer:
         """Train BPE with parallel processing and proper error handling."""
         logger.info("Starting BPE training...")
         
-        # Parallel word frequency counting
         word_freqs = defaultdict(int)
-        with ProcessPoolExecutor(max_workers=self.config.num_threads) as executor:
-            tokenized_texts = list(tqdm(
-                executor.map(self._tokenize_worker, texts),
-                total=len(texts),
-                desc="Tokenizing texts"
-            ))
+        if self.config.num_threads and self.config.num_threads > 1:
+            with ProcessPoolExecutor(max_workers=self.config.num_threads) as executor:
+                tokenized_texts = list(tqdm(
+                    executor.map(self._tokenize_worker, texts),
+                    total=len(texts),
+                    desc="Tokenizing texts"
+                ))
+        else:
+            tokenized_texts = [
+                self._tokenize_worker(text)
+                for text in tqdm(texts, desc="Tokenizing texts")
+            ]
             
         for words in tokenized_texts:
             for word in words:
@@ -152,7 +154,7 @@ class BPETokenizer:
         pbar = tqdm(total=num_merges, desc="Learning merges")
         
         try:
-            while len(self.vocab) < self.config.vocab_size:
+            while len(self.vocab) < self.config.vocab_size and len(self.vocab) < self.config.vocab_size:
                 # Count pairs
                 pair_freqs = defaultdict(int)
                 for word, freq in word_freqs.items():

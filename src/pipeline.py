@@ -14,11 +14,11 @@ from itertools import islice
 import pytorch_lightning as pl
 import wandb
 
-from data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
-from data.tokenization.bpe_tokenizer import BPETokenizer
-from data.preprocessing.data_module import LMDataModule
-from model.architecture.transformer import TransformerConfig
-from model.training.trainer import TransformerLightningModule
+from src.data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
+from src.data.tokenization.bpe_tokenizer import BPETokenizer
+from src.data.preprocessing.data_module import LMDataModule
+from src.model.architecture.transformer import TransformerConfig
+from src.model.training.trainer import TransformerLightningModule
 
 class Pipeline:
     def __init__(self, config_path: str, experiment_name: str):
@@ -229,8 +229,17 @@ class Pipeline:
             num_attention_heads=self.config['model']['num_attention_heads'],
             intermediate_size=self.config['model']['intermediate_size'],
             max_position_embeddings=self.config['model']['max_position_embeddings'],
-            hidden_dropout_prob=self.config['model'].get('dropout', 0.1),
-            attention_dropout_prob=self.config['model'].get('attention_dropout', 0.1)
+            hidden_dropout_prob=self.config['model'].get(
+                'hidden_dropout_prob',
+                self.config['model'].get('dropout', 0.1),
+            ),
+            attention_dropout_prob=self.config['model'].get(
+                'attention_dropout_prob',
+                self.config['model'].get('attention_dropout', 0.1),
+            ),
+            layer_norm_epsilon=float(self.config['model'].get('layer_norm_epsilon', 1e-5)),
+            initializer_range=self.config['model'].get('initializer_range', 0.02),
+            tie_word_embeddings=self.config['model'].get('tie_word_embeddings', True),
         )
 
         # Save the inference-compatible config.json

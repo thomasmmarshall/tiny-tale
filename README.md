@@ -39,38 +39,38 @@ model_config = {
 
 ## Getting Started
 
-[Installation and setup instructions to be added]
-
 ```bash
 # Create and activate virtual environment
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# For M2 Mac, ensure you're using the correct PyTorch version
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+# Run tests
+python -m pytest
 ```
 
-````bash
-# Create datasets
+```bash
+# Create the WikiText-103 dataset files under data/raw/
 python scripts/create_wikitext2_dataset.py
 ```
 
-# Run training pipeline
+## Run training pipeline
+
 ```bash
 python src/pipeline.py configs/pipeline_config.yaml experiment_name
 ```
 
-# Run inference pipeline
+## Run inference pipeline
+
 ```bash
 python src/inference_pipeline.py
-	--model_path experiments/experiment_name
-	--tokenizer_path experiments/experiment_name/tokenizer/tokenizer.json
-	--input_text "What is your name?"
-	--max_length 100 --temperature 0.9 --top_k 50 --top_p 0.92
+  --model_path experiments/experiment_name \
+  --tokenizer_path experiments/experiment_name/tokenizer/tokenizer.json \
+  --input_text "What is your name?" \
+  --max_length 100 --temperature 0.9 --top_k 50 --top_p 0.92
 ```
 
 ## References
@@ -78,4 +78,3 @@ python src/inference_pipeline.py
 - LLaMA: Open and Efficient Foundation Language Models (Touvron et al., 2023)
 - LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)
 - ... etc, will get to it.
-````

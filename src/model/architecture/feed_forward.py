@@ -1,9 +1,8 @@
-
-
-# src/model/architecture/feed_forward.py
 import torch
 import torch.nn as nn
-from config import TransformerConfig
+import torch.nn.functional as F
+
+from .transformer import TransformerConfig
 
 class FeedForward(nn.Module):
     """
@@ -13,10 +12,10 @@ class FeedForward(nn.Module):
     
     def __init__(self, config: TransformerConfig):
         super().__init__()
-        self.w1 = nn.Linear(config.hidden_size, config.feed_forward_size, bias=config.bias)
-        self.w2 = nn.Linear(config.feed_forward_size, config.hidden_size, bias=config.bias)
-        self.w3 = nn.Linear(config.hidden_size, config.feed_forward_size, bias=config.bias)  # for SwiGLU
-        self.dropout = nn.Dropout(config.dropout)
+        self.w1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=config.bias)
+        self.w2 = nn.Linear(config.intermediate_size, config.hidden_size, bias=config.bias)
+        self.w3 = nn.Linear(config.hidden_size, config.intermediate_size, bias=config.bias)  # for SwiGLU
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # SwiGLU activation

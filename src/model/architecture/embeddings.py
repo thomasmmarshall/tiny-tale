@@ -1,9 +1,9 @@
 # src/model/architecture/embeddings.py
 import torch
 import torch.nn as nn
-import math
-from config import TransformerConfig
 from typing import Optional
+
+from .transformer import TransformerConfig
 
 class Embeddings(nn.Module):
     """Combines token embeddings with optional learned position embeddings."""
@@ -16,11 +16,11 @@ class Embeddings(nn.Module):
         self.use_learned_position_embeddings = not config.use_rope
         if self.use_learned_position_embeddings:
             self.position_embeddings = nn.Embedding(
-                config.max_seq_length,
+                config.max_position_embeddings,
                 config.hidden_size
             )
             
-        self.dropout = nn.Dropout(config.dropout)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(
         self,
