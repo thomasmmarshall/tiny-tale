@@ -3,7 +3,7 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 import yaml
 import torch
 import psutil
@@ -107,48 +107,53 @@ class Pipeline:
         }
         self.logger.info("PyTorch Information:\n" + json.dumps(torch_info, indent=2))
 
-    def process_data(self) -> List[str]:
-        """Clean and preprocess the raw training data."""
+    def process_data(self) -> Dict[str, object]:
+        """Clean train/validation data and keep tokenizer/model text aligned."""
         self.logger.info("=== Starting Data Processing ===")
         
         cleaning_config = TextCleaningConfig(**self.config['data']['cleaning'])
         cleaner = TextCleaner(cleaning_config)
         self.logger.info(f"TextCleaner initialized with config: {cleaning_config}")
 
-        train_path = Path(self.config['data']['train_path'])
-        self.logger.info(f"Processing training data from {train_path}")
+        processed_paths = {}
+        train_texts: List[str] = []
+        for split, config_key in (("train", "train_path"), ("val", "val_path")):
+            input_path = Path(self.config['data'][config_key])
+            output_path = self.experiment_dir / 'processed_data' / f'{split}.txt'
+            self.logger.info(f"Processing {split} data from {input_path}")
 
-        # Log a small sample of raw data
-        with open(train_path, 'r') as f:
-            sample_raw = list(islice(f, 5))
-        self.logger.info(f"Sample of raw training data:\n{sample_raw}")
+            with open(input_path, 'r', encoding='utf-8') as f:
+                sample_raw = list(islice(f, 5))
+            self.logger.info(f"Sample of raw {split} data:\n{sample_raw}")
 
-        start_time = time.time()
-        processed_texts = []
-        lines_processed = 0
+            start_time = time.time()
+            processed_texts = []
+            lines_processed = 0
+            with open(input_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    cleaned_line = cleaner.clean_text(line)
+                    if cleaned_line:
+                        processed_texts.append(cleaned_line)
+                    lines_processed += 1
+                    if lines_processed % 10000 == 0:
+                        self.logger.info(f"Processed {lines_processed} {split} lines...")
 
-        with open(train_path, 'r') as f:
-            for line in f:
-                cleaned_line = cleaner.clean_text(line)
-                if cleaned_line:
-                    processed_texts.append(cleaned_line)
-                lines_processed += 1
-                if lines_processed % 10000 == 0:
-                    self.logger.info(f"Processed {lines_processed} lines...")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(processed_texts))
 
-        processing_time = time.time() - start_time
-        total_tokens = sum(len(t.split()) for t in processed_texts)
-        self.logger.info(f"Data processing completed in {processing_time:.2f} seconds")
-        self.logger.info(f"Total tokens: {total_tokens}")
-        self.logger.info("Sample of processed texts:\n" + json.dumps(processed_texts[:5], indent=2))
+            processing_time = time.time() - start_time
+            total_tokens = sum(len(t.split()) for t in processed_texts)
+            self.logger.info(
+                f"{split} processing completed in {processing_time:.2f}s; "
+                f"{len(processed_texts)} lines, ~{total_tokens} whitespace tokens"
+            )
+            self.logger.info("Sample of processed texts:\n" + json.dumps(processed_texts[:5], indent=2))
+            processed_paths[split] = output_path
+            if split == "train":
+                train_texts = processed_texts
 
-        # Save processed data
-        processed_train_path = self.experiment_dir / 'processed_data' / 'train.txt'
-        with open(processed_train_path, 'w') as f:
-            f.write("\n".join(processed_texts))
-        self.logger.info(f"Processed training data saved to {processed_train_path}")
-
-        return processed_texts
+        return {"train_texts": train_texts, "paths": processed_paths}
 
     def train_tokenizer(self, texts: List[str]) -> BPETokenizer:
         """Train and save the BPE tokenizer, or load if it already exists."""
@@ -204,18 +209,19 @@ class Pipeline:
         self.logger.info(f"Tokenizer saved to {tokenizer_path}")
         return tokenizer
 
-    def setup_data_module(self, tokenizer: BPETokenizer) -> LMDataModule:
+    def setup_data_module(self, tokenizer: BPETokenizer, processed_paths: Dict[str, Path]) -> LMDataModule:
         """Initialize the data module for training."""
         self.logger.info("Setting up data module...")
-        data_config = self.config['data']
-        dataloader_config = data_config['dataloader']
+        dataloader_config = self.config['data']['dataloader']
         data_module = LMDataModule(
-            train_path=data_config['train_path'],
-            val_path=data_config['val_path'],
+            train_path=processed_paths['train'],
+            val_path=processed_paths['val'],
             tokenizer=tokenizer,
             batch_size=dataloader_config['batch_size'],
             max_length=dataloader_config['max_length'],
-            num_workers=dataloader_config.get('num_workers', 4)
+            num_workers=dataloader_config.get('num_workers', 4),
+            shuffle_buffer_size=dataloader_config.get('shuffle_buffer_size', 1000),
+            pack_sequences=dataloader_config.get('pack_sequences', True),
         )
         return data_module
 
@@ -295,9 +301,9 @@ class Pipeline:
         self.log_system_info()
 
         try:
-            processed_texts = self.process_data()
-            tokenizer = self.train_tokenizer(processed_texts)
-            data_module = self.setup_data_module(tokenizer)
+            processed = self.process_data()
+            tokenizer = self.train_tokenizer(processed["train_texts"])
+            data_module = self.setup_data_module(tokenizer, processed["paths"])
             model = self.setup_model()
 
             self.logger.info("=== Starting Model Training ===")

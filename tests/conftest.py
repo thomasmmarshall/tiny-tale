@@ -6,9 +6,10 @@ import pytest
 class MockTokenizer:
     def __init__(self):
         self.pad_token_id = 0
+        self.eos_token_id = 99
 
-    def encode(self, text):
-        return [ord(c) % 100 for c in text]
+    def encode(self, text, **kwargs):
+        return [ord(c) % 90 + 1 for c in text]
 
 
 @pytest.fixture
