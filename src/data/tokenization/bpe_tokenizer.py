@@ -154,7 +154,7 @@ class BPETokenizer:
         pbar = tqdm(total=num_merges, desc="Learning merges")
         
         try:
-            while len(self.vocab) < self.config.vocab_size and len(self.vocab) < self.config.vocab_size:
+            while len(self.vocab) < self.config.vocab_size:
                 # Count pairs
                 pair_freqs = defaultdict(int)
                 for word, freq in word_freqs.items():
@@ -170,6 +170,7 @@ class BPETokenizer:
                         pair_freqs[pair] += freq
                 
                 if not pair_freqs:
+                    logger.info("No more merge candidates available; stopping BPE training early.")
                     break
                 
                 # Find best pair
@@ -179,6 +180,7 @@ class BPETokenizer:
                 # Validate new token
                 if len(new_token) > self.config.max_token_length:
                     logger.warning(f"Skipping merge that would create token longer than {self.config.max_token_length} chars")
+                    splits.pop(''.join(best_pair), None)
                     continue
                 
                 self.vocab.add_token(new_token)

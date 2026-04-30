@@ -26,6 +26,8 @@ class LMDataModule(pl.LightningDataModule):
         max_length: int = 256,
         num_workers: int = 0,
         shuffle_buffer_size: int = 1000,
+        pack_sequences: bool = True,
+        drop_last_block: bool = True,
         prefetch_factor: Optional[int] = None,
     ):
         super().__init__()
@@ -36,6 +38,8 @@ class LMDataModule(pl.LightningDataModule):
         self.max_length = max_length
         self.num_workers = num_workers
         self.shuffle_buffer_size = shuffle_buffer_size
+        self.pack_sequences = pack_sequences
+        self.drop_last_block = drop_last_block
         self.prefetch_factor = prefetch_factor
         self.collator = TextDataCollator(pad_token_id=tokenizer.pad_token_id)
 
@@ -45,12 +49,16 @@ class LMDataModule(pl.LightningDataModule):
             self.tokenizer,
             max_length=self.max_length,
             shuffle_buffer_size=self.shuffle_buffer_size,
+            pack_documents=self.pack_sequences,
+            drop_last=self.drop_last_block,
         )
         self.val_dataset = StreamingTextDataset(
             self.val_path,
             self.tokenizer,
             max_length=self.max_length,
             shuffle_buffer_size=1,
+            pack_documents=self.pack_sequences,
+            drop_last=False,
         )
 
     def _loader(self, dataset, shuffle: bool):
