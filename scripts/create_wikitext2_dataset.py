@@ -1,4 +1,4 @@
-# scripts/create_wikitext_dataset.py
+# scripts/create_wikitext2_dataset.py
 import os
 import logging
 from pathlib import Path

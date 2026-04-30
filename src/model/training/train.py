@@ -8,7 +8,6 @@ from pytorch_lightning.callbacks import (
     GradientAccumulationScheduler
 )
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import DeepSpeedStrategy
 import torch
 import argparse
 from pathlib import Path
@@ -21,6 +20,12 @@ from typing import Optional, Dict, Any
 from ..architecture.transformer import TransformerConfig
 from .trainer import TransformerLightningModule
 from ...data.preprocessing.data_module import LMDataModule
+from ...data.tokenization.bpe_tokenizer import BPETokenizer
+
+try:
+    from pytorch_lightning.strategies import DeepSpeedStrategy
+except ImportError:  # pragma: no cover - optional dependency.
+    DeepSpeedStrategy = None
 
 # Global variable to track if training should be interrupted
 should_stop = False
@@ -59,7 +64,11 @@ class GracefulExitCallback(pl.Callback):
             if hasattr(trainer.datamodule, 'tokenizer'):
                 tokenizer_dir = self.experiment_dir / 'tokenizer'
                 tokenizer_dir.mkdir(parents=True, exist_ok=True)
-                trainer.datamodule.tokenizer.save_pretrained(str(tokenizer_dir))
+                tokenizer = trainer.datamodule.tokenizer
+                if hasattr(tokenizer, 'save_pretrained'):
+                    tokenizer.save_pretrained(str(tokenizer_dir))
+                elif hasattr(tokenizer, 'save'):
+                    tokenizer.save(str(tokenizer_dir / 'tokenizer.json'))
             
             print(f"\nModel and configurations saved to {self.experiment_dir}")
             print(f"You can now use this model for inference with:")
@@ -144,7 +153,8 @@ def train(args):
         hidden_dropout_prob=args.hidden_dropout,
         attention_dropout_prob=args.attention_dropout,
         use_rope=not args.disable_rope,
-        bias=not args.disable_bias
+        bias=not args.disable_bias,
+        num_key_value_heads=args.num_key_value_heads,
     )
     
     # Save the inference-compatible config.json in experiment directory
@@ -161,18 +171,45 @@ def train(args):
             "hidden_dropout": config.hidden_dropout_prob,
             "attention_dropout": config.attention_dropout_prob,
             "disable_rope": not config.use_rope,
-            "disable_bias": not config.bias
+            "disable_bias": not config.bias,
+            "num_key_value_heads": config.num_key_value_heads,
+            "rope_theta": config.rope_theta,
+            "use_sdpa": config.use_sdpa,
         }, f, indent=2)
     
     # Also save the full model config for reference
     config.save(experiment_dir / 'model_config.json')
     
+    tokenizer_path = Path(args.tokenizer_path) if args.tokenizer_path else experiment_dir / 'tokenizer' / 'tokenizer.json'
+    if tokenizer_path.exists():
+        tokenizer = BPETokenizer.load(str(tokenizer_path))
+    elif args.train_tokenizer:
+        tokenizer = BPETokenizer({
+            'vocab_size': args.vocab_size,
+            'min_frequency': args.tokenizer_min_frequency,
+            'special_tokens': {
+                '<pad>': '[PAD]',
+                '<unk>': '[UNK]',
+                '<bos>': '[BOS]',
+                '<eos>': '[EOS]',
+            },
+            'num_threads': args.tokenizer_num_threads,
+        })
+        with open(args.train_path, 'r', encoding='utf-8') as f:
+            tokenizer.train([line.strip() for line in f if line.strip()])
+        tokenizer_path.parent.mkdir(parents=True, exist_ok=True)
+        tokenizer.save(str(tokenizer_path))
+    else:
+        raise FileNotFoundError(
+            f"Tokenizer not found at {tokenizer_path}. Pass --tokenizer_path or --train_tokenizer."
+        )
+
     # Initialize data module with proper error handling
     try:
         data_module = LMDataModule(
             train_path=args.train_path,
             val_path=args.val_path,
-            tokenizer=None,  # Will be initialized in data module
+            tokenizer=tokenizer,
             batch_size=args.batch_size,
             max_length=args.max_seq_length,
             num_workers=args.num_workers,
@@ -188,6 +225,7 @@ def train(args):
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_steps,
         max_steps=args.max_steps,
+        min_learning_rate=args.min_learning_rate,
         use_gradient_checkpointing=args.gradient_checkpointing
     )
     
@@ -209,6 +247,8 @@ def train(args):
     
     # Initialize training strategy
     if args.use_deepspeed:
+        if DeepSpeedStrategy is None:
+            raise RuntimeError("DeepSpeedStrategy is not available. Install Lightning with DeepSpeed support.")
         strategy = DeepSpeedStrategy(
             stage=2,
             offload_optimizer=args.offload_optimizer,
@@ -219,13 +259,17 @@ def train(args):
     else:
         strategy = 'ddp' if args.num_gpus > 1 else 'auto'
     
+    accelerator = 'mps' if torch.backends.mps.is_available() else ('gpu' if torch.cuda.is_available() else 'cpu')
+    devices = 1 if accelerator in {'mps', 'cpu'} else args.num_gpus
+
     # Initialize trainer with all configurations
     trainer = pl.Trainer(
         max_steps=args.max_steps,
         max_epochs=args.max_epochs,
-        accelerator='mps',
-        devices=1,
-        precision=32,
+        accelerator=accelerator,
+        devices=devices,
+        precision=32 if accelerator == 'mps' else args.precision,
+        strategy=strategy,
         accumulate_grad_batches=args.gradient_accumulation_steps,
         gradient_clip_val=args.grad_clip_val,
         val_check_interval=args.val_check_interval,
@@ -264,14 +308,20 @@ def main():
     parser.add_argument('--attention_dropout', type=float, default=0.1)
     parser.add_argument('--disable_rope', action='store_true')
     parser.add_argument('--disable_bias', action='store_true')
+    parser.add_argument('--num_key_value_heads', type=int)
     
     # Training arguments
     parser.add_argument('--train_path', type=str, required=True)
     parser.add_argument('--val_path', type=str, required=True)
+    parser.add_argument('--tokenizer_path', type=str)
+    parser.add_argument('--train_tokenizer', action='store_true')
+    parser.add_argument('--tokenizer_min_frequency', type=int, default=2)
+    parser.add_argument('--tokenizer_num_threads', type=int, default=1)
     parser.add_argument('--output_dir', type=str, default='experiments')
     parser.add_argument('--run_name', type=str, required=True)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--learning_rate', type=float, default=3e-4)
+    parser.add_argument('--min_learning_rate', type=float, default=None)
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--warmup_steps', type=int, default=1000)
     parser.add_argument('--max_steps', type=int, default=100000)

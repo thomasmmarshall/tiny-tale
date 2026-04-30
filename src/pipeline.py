@@ -14,11 +14,11 @@ from itertools import islice
 import pytorch_lightning as pl
 import wandb
 
-from data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
-from data.tokenization.bpe_tokenizer import BPETokenizer
-from data.preprocessing.data_module import LMDataModule
-from model.architecture.transformer import TransformerConfig
-from model.training.trainer import TransformerLightningModule
+from src.data.preprocessing.clean_text import TextCleaner, TextCleaningConfig
+from src.data.tokenization.bpe_tokenizer import BPETokenizer
+from src.data.preprocessing.data_module import LMDataModule
+from src.model.architecture.transformer import TransformerConfig
+from src.model.training.trainer import TransformerLightningModule
 
 class Pipeline:
     def __init__(self, config_path: str, experiment_name: str):
@@ -229,8 +229,21 @@ class Pipeline:
             num_attention_heads=self.config['model']['num_attention_heads'],
             intermediate_size=self.config['model']['intermediate_size'],
             max_position_embeddings=self.config['model']['max_position_embeddings'],
-            hidden_dropout_prob=self.config['model'].get('dropout', 0.1),
-            attention_dropout_prob=self.config['model'].get('attention_dropout', 0.1)
+            hidden_dropout_prob=self.config['model'].get(
+                'hidden_dropout_prob',
+                self.config['model'].get('dropout', 0.1),
+            ),
+            attention_dropout_prob=self.config['model'].get(
+                'attention_dropout_prob',
+                self.config['model'].get('attention_dropout', 0.1),
+            ),
+            layer_norm_epsilon=float(self.config['model'].get('layer_norm_epsilon', 1e-5)),
+            initializer_range=self.config['model'].get('initializer_range', 0.02),
+            tie_word_embeddings=self.config['model'].get('tie_word_embeddings', True),
+            use_rope=self.config['model'].get('use_rope', True),
+            num_key_value_heads=self.config['model'].get('num_key_value_heads'),
+            rope_theta=self.config['model'].get('rope_theta', 10000.0),
+            use_sdpa=self.config['model'].get('use_sdpa', True),
         )
 
         # Save the inference-compatible config.json
@@ -247,7 +260,10 @@ class Pipeline:
                 "hidden_dropout": model_config.hidden_dropout_prob,
                 "attention_dropout": model_config.attention_dropout_prob,
                 "disable_rope": not model_config.use_rope,
-                "disable_bias": not model_config.bias
+                "disable_bias": not model_config.bias,
+                "num_key_value_heads": model_config.num_key_value_heads,
+                "rope_theta": model_config.rope_theta,
+                "use_sdpa": model_config.use_sdpa,
             }, f, indent=2)
         self.logger.info(f"Saved inference config to {config_path}")
 
@@ -259,10 +275,12 @@ class Pipeline:
         model = TransformerLightningModule(
             config=model_config,
             learning_rate=self.config['training']['learning_rate'],
+            min_learning_rate=self.config['training'].get('min_learning_rate'),
             weight_decay=self.config['training'].get('weight_decay', 0.01),
             warmup_steps=self.config['training'].get('warmup_steps', 1000),
             max_steps=self.config['training']['max_steps'],
-            grad_clip_val=self.config['training'].get('grad_clip_val', 1.0)
+            grad_clip_val=self.config['training'].get('grad_clip_val', 1.0),
+            use_gradient_checkpointing=self.config['training'].get('gradient_checkpointing', False),
         )
 
         # Move model to MPS device if available

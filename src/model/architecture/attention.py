@@ -101,7 +101,7 @@ class MultiHeadAttention(nn.Module):
         self.resid_dropout = nn.Dropout(config.hidden_dropout_prob)
         
         # Flash attention config
-        self.use_flash_attn = FLASH_ATTENTION_AVAILABLE and not config.get('disable_flash_attn', False)
+        self.use_flash_attn = FLASH_ATTENTION_AVAILABLE and not getattr(config, 'disable_flash_attn', False)
         
     def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
         """Split heads and transpose for attention computation."""

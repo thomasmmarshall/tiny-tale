@@ -10,17 +10,9 @@ class MockTokenizer:
     def __init__(self):
         self.pad_token_id = 0
         
-    def encode(self, text):
+    def encode(self, text, **kwargs):
         # Simple mock encoding: just convert to list of char codes
         return [ord(c) % 100 for c in text]
-
-@pytest.fixture
-def sample_data():
-    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-        f.write("Hello world\n")
-        f.write("This is a test\n")
-        f.write("Another line of text\n")
-        return Path(f.name)
 
 @pytest.fixture
 def tokenizer():

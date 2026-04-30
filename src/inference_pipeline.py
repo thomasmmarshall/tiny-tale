@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import List, Optional
 import json
 
-from model.inference import ModelInference
-from data.tokenization.bpe_tokenizer import BPETokenizer
+from src.model.inference import ModelInference
+from src.data.tokenization.bpe_tokenizer import BPETokenizer
 
 def setup_argument_parser() -> argparse.ArgumentParser:
     """Set up command line argument parser."""
@@ -81,11 +81,17 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     )
     
     # Hardware options
+    available_devices = ['cpu']
+    if torch.cuda.is_available():
+        available_devices.append('cuda')
+    if torch.backends.mps.is_available():
+        available_devices.append('mps')
+
     parser.add_argument(
         '--device',
         type=str,
-        default='cuda' if torch.cuda.is_available() else 'cpu',
-        choices=['cuda', 'cpu'],
+        default='cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu',
+        choices=available_devices,
         help='Device to run inference on'
     )
     parser.add_argument(

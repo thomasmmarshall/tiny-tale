@@ -24,53 +24,59 @@ For 8GB RAM constraints:
 
 ```python
 model_config = {
-    'vocab_size': 8192,        # Smaller vocabulary for efficiency
-    'hidden_size': 384,        # Balanced for expressivity vs memory
-    'num_layers': 6,           # Enough depth for non-trivial learning
-    'num_heads': 6,            # Multiple attention patterns
-    'max_seq_length': 256,     # Manageable context size
-    'batch_size': 8,           # Adjusted based on memory
-    'learning_rate': 3e-4,     # Standard for transformer training
-    'warmup_steps': 1000,      # Gradual learning rate warmup
-    'gradient_checkpointing': True,  # Memory optimization
-    'mixed_precision': 'fp16'   # Memory and speed optimization
+    'vocab_size': 16384,
+    'hidden_size': 384,
+    'num_hidden_layers': 8,
+    'num_attention_heads': 6,
+    'num_key_value_heads': 2,      # grouped-query attention
+    'intermediate_size': 1024,     # SwiGLU FFN
+    'max_position_embeddings': 512,
+    'use_rope': True,
+    'use_rms_norm': True,
+    'gradient_checkpointing': True,
+    'learning_rate': 3e-4,
+    'warmup_steps': 500,
 }
 ```
 
-## Getting Started
+The core block follows current small-LLM practice: RMSNorm, RoPE, SwiGLU,
+grouped-query capable attention, tied embeddings, SDPA where available, and
+warmup + cosine learning-rate decay.
 
-[Installation and setup instructions to be added]
+## Getting Started
 
 ```bash
 # Create and activate virtual environment
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# For M2 Mac, ensure you're using the correct PyTorch version
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+# Run tests
+python -m pytest
 ```
 
-````bash
-# Create datasets
+```bash
+# Create the WikiText-103 dataset files under data/raw/
 python scripts/create_wikitext2_dataset.py
 ```
 
-# Run training pipeline
+## Run training pipeline
+
 ```bash
 python src/pipeline.py configs/pipeline_config.yaml experiment_name
 ```
 
-# Run inference pipeline
+## Run inference pipeline
+
 ```bash
 python src/inference_pipeline.py
-	--model_path experiments/experiment_name
-	--tokenizer_path experiments/experiment_name/tokenizer/tokenizer.json
-	--input_text "What is your name?"
-	--max_length 100 --temperature 0.9 --top_k 50 --top_p 0.92
+  --model_path experiments/experiment_name \
+  --tokenizer_path experiments/experiment_name/tokenizer/tokenizer.json \
+  --input_text "What is your name?" \
+  --max_length 100 --temperature 0.9 --top_k 50 --top_p 0.92
 ```
 
 ## References
@@ -78,4 +84,3 @@ python src/inference_pipeline.py
 - LLaMA: Open and Efficient Foundation Language Models (Touvron et al., 2023)
 - LoRA: Low-Rank Adaptation of Large Language Models (Hu et al., 2021)
 - ... etc, will get to it.
-````

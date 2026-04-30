@@ -57,6 +57,8 @@ saved_models/
 
 # Data
 data/
+!src/data/
+!src/data/**
 datasets/
 raw_data/
 processed_data/
@@ -132,7 +134,6 @@ experiments/
 # Configuration files that might contain secrets
 config.yaml
 *.config
-*_config.yaml
 *_config.json
 
 # Exceptions (add with !)
